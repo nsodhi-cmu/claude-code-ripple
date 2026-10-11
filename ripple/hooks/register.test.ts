@@ -3,11 +3,12 @@ import type { Engine } from 'claude-code/testing'
 import type { On, RenderPropsOf } from 'claude-code'
 
 import { DEMO_MAP } from './demo'
-import { MAPPING_MARKER } from './model'
+import { MAPPING_MARKER, printOf } from './model'
 
-// The whole loop through the engine: an edit is tracked, /ripple asks Claude
-// to map, the report tool saves the map and answers, an edit to a flagged
-// caller turns it green, and the pane draws all of it on every surface.
+// The whole loop through the engine. Ripple reads the working tree from git
+// and nothing else: /ripple asks Claude to map the uncommitted changes, the
+// report tool saves the map and answers, a later change to a flagged caller
+// turns it green, and the pane draws all of it on every surface.
 
 const ROOT = 'C:/repo/shop'
 /** Past the first of the plugin's submit timers. */
@@ -25,12 +26,28 @@ const PANE: RenderPropsOf['Pane'] = {
 /** The demo map as Claude would report it: no `isDemo`. */
 const REPORT = { method: DEMO_MAP.method, nodes: DEMO_MAP.nodes, edges: DEMO_MAP.edges }
 
-/** Where the stand-in Edit tool says each file changed. */
-const CHANGED_LINE: Record<string, number> = { 'price.ts': 1, 'cart.ts': 14, 'ui.ts': 300 }
+const fileDiff = (file: string, line: number, added: string): string =>
+  [
+    `diff --git a/${file} b/${file}`,
+    'index 1111111..2222222 100644',
+    `--- a/${file}`,
+    `+++ b/${file}`,
+    `@@ -${line} +${line} @@`,
+    '-old',
+    `+${added}`,
+    '',
+  ].join('\n')
+
+/** The change: formatPrice gains a parameter. */
+const PRICE_DIFF = fileDiff('src/price.ts', 1, 'export function formatPrice(amount: number, currency: string): string {')
+/** A fix to the flagged caller renderCart, at its call on line 14. */
+const CART_DIFF = fileDiff('src/cart.ts', 14, '  return formatPrice(total, cart.currency)')
+/** A change far from any flagged caller. */
+const UI_DIFF = fileDiff('src/ui.ts', 300, 'unrelated')
 
 /**
- * Stands in for everything beneath the plugin: the tools, the store, the clock
- * and the surface. Returns what the plugin did to each.
+ * Stands in for everything beneath the plugin: git, the store, the clock and
+ * the surface. Returns what the plugin did to each.
  */
 const world = (on: On) => {
   const seen = {
@@ -43,6 +60,11 @@ const world = (on: On) => {
     commands: [] as string[],
     files: new Map<string, string>(),
     ran: [] as string[][],
+    git: [] as string[][],
+    /** What `git diff HEAD` answers: the working tree's uncommitted changes. */
+    diff: '',
+    /** What `git ls-files --others` answers: files git does not track yet. */
+    untracked: '',
     store: new Map<string, unknown>(),
     edited: 0,
   }
@@ -58,7 +80,6 @@ const world = (on: On) => {
     seen.store.delete(e.key)
     return { value: undefined }
   })
-
   on('session.start', ($, e) => ({ cwd: e.cwd }))
   on('session.root', () => ({ value: ROOT }))
   on('turn.start', ($, e) => ({ turnId: e.turnId }))
@@ -97,36 +118,27 @@ const world = (on: On) => {
     return { value: undefined }
   })
   on('process.run', ($, e) => {
-    seen.ran.push([...e.argv])
-    return {
-      value: { exitCode: 0, stdout: '', stderr: '', isStdoutTruncated: false, isStderrTruncated: false },
-    }
+    const isGit = e.argv[0] === 'git'
+    if (isGit) seen.git.push([...e.argv])
+    else seen.ran.push([...e.argv])
+    const stdout = !isGit ? '' : e.argv[1] === 'diff' ? seen.diff : seen.untracked
+    return { value: { exitCode: 0, stdout, stderr: '', isStdoutTruncated: false, isStderrTruncated: false } }
   })
   // The engine's own spinner, which the plugin reads the word of and passes on.
   on('ui.render', { component: 'Spinner' }, ($, e) => {
     const { Text } = $.ui.resolve(e)
     return Text({ children: e.props.word })
   })
-  // The Edit tool itself: answers with a patch that changes one line.
+  // The Edit tool itself. Ripple does not hook it: the call must come straight here.
   on('tool.call', { tool: 'Edit' }, ($, e) => {
     seen.edited += 1
-    const name = e.file_path.replaceAll('\\', '/').split('/').pop() ?? ''
-    const line = CHANGED_LINE[name] ?? 3
     return {
       result: {
         filePath: e.file_path,
         oldString: e.old_string,
         newString: e.new_string,
         originalFile: null,
-        structuredPatch: [
-          {
-            oldStart: line,
-            oldLines: 2,
-            newStart: line,
-            newLines: 2,
-            lines: ['-old', `+${e.new_string}`, ' c'],
-          },
-        ],
+        structuredPatch: [],
         userModified: false,
         replaceAll: false,
       },
@@ -146,57 +158,77 @@ const ripple = ($: Engine, args = '') =>
     presentation: { isFullscreen: true, columns: 160 },
   })
 
-const edit = ($: Engine, file: string, text: string) =>
-  $.tool.call({ tool: 'Edit', file_path: `C:\\repo\\shop\\src\\${file}`, old_string: 'old', new_string: text })
+/** One turn of Claude's, from start to end; whatever it changed is in `seen.diff` by then. */
+const turn = async ($: Engine, id: string, text = 'do something') => {
+  await $.turn.start({ text, turnId: id })
+  await $.turn.complete({ answer: 'done', durationMs: 5, isAborted: false, reason: 'answer', turnId: id })
+}
 
-test('session start registers the report tool in the prompt and /ripple', async ($, on) => {
+const mountPane = ($: Engine) =>
+  $.ui.mount({ plugin: 'ripple', surface: 'terminal', component: 'Pane', requestId: 'ripple', props: PANE })
+
+test('session start registers the report tool and /ripple, and reads the tree', async ($, on) => {
   const { seen } = world(on)
   await start($)
   expect(seen.tools).toEqual([{ name: 'report', isDeferred: false }])
   expect(seen.commands).toEqual(['ripple'])
   expect(seen.status.at(-1)).toBeUndefined()
+  expect(seen.git).toEqual([
+    ['git', 'diff', 'HEAD', '--relative', '--unified=0', '--no-color', '--no-ext-diff'],
+    ['git', 'ls-files', '--others', '--exclude-standard'],
+  ])
 })
 
-test('an edit is tracked on the status line, and the tool result passes through', async ($, on) => {
+test('uncommitted changes at session start are offered on the status line', async ($, on) => {
   const { seen } = world(on)
+  seen.diff = PRICE_DIFF + UI_DIFF
+  seen.untracked = 'src/new.ts\n'
   await start($)
-  const ran = await edit($, 'price.ts', 'export function formatPrice(amount: number, currency: string): string {')
-  expect(ran.result).toMatchObject({ filePath: 'C:\\repo\\shop\\src\\price.ts' })
-  expect(seen.status.at(-1)).toBe('ripple: 1 edit · 1 file · /ripple to map')
-  await edit($, 'price.ts', 'return currencySymbol(currency) + toFixed2(amount)')
-  await edit($, 'ui.ts', 'x')
-  expect(seen.status.at(-1)).toBe('ripple: 3 edits · 2 files · /ripple to map')
+  expect(seen.status.at(-1)).toBe('ripple: uncommitted changes in 3 files · /ripple to map')
 })
 
-test('/ripple with no edits says so and asks the model nothing', async ($, on) => {
+test('/ripple with a clean tree says so in the transcript and asks the model nothing', async ($, on) => {
   const { seen, clock } = world(on)
   await start($)
-  expect(await ripple($)).toEqual({})
+  const answered = await ripple($)
+  expect(answered.text).toStartWith('Ripple: nothing to map.')
+  expect(answered.text).toContain('Git shows no uncommitted changes here')
   await clock.advance(SUBMIT_AFTER_MS)
-  expect(seen.toasts).toEqual(['Ripple: no edits to map yet.'])
   expect(seen.prompts).toEqual([])
   expect(seen.opened).toEqual([])
 })
 
-test('the loop: map, report, fix a caller, see it turn green', async ($, on) => {
-  const { seen, clock } = world(on)
+test('Ripple does not listen to Edit calls: only the diff counts', async ($, on) => {
+  const { seen } = world(on)
   await start($)
-  await edit($, 'price.ts', 'export function formatPrice(amount: number, currency: string): string {')
+  const before = seen.status.length
+  await $.tool.call({ tool: 'Edit', file_path: 'C:\\repo\\shop\\src\\price.ts', old_string: 'a', new_string: 'b' })
+  expect(seen.edited).toBe(1)
+  expect(seen.status.length).toBe(before)
+  expect((await ripple($)).text).toStartWith('Ripple: nothing to map.')
+})
 
-  // /ripple asks Claude to map and opens the pane at once.
+test('the loop: /ripple maps the diff, Claude reports, a fix turns a caller green', async ($, on) => {
+  const { seen, clock } = world(on)
+  seen.diff = PRICE_DIFF
+  await start($)
+  expect(seen.status.at(-1)).toBe('ripple: uncommitted changes in 1 file · /ripple to map')
+
+  // /ripple asks Claude to map the diff and opens the pane at once.
   expect(await ripple($)).toEqual({})
   expect(seen.prompts).toEqual([])
   await clock.advance(SUBMIT_AFTER_MS)
   expect(seen.prompts).toHaveLength(1)
   expect(seen.prompts[0]).toStartWith(MAPPING_MARKER)
+  expect(seen.prompts[0]).toContain('Uncommitted changes in the working tree (from `git diff HEAD`')
   expect(seen.prompts[0]).toContain(
     '- src/price.ts:1: `export function formatPrice(amount: number, currency: string): string {`',
   )
-  expect(seen.toasts.at(-1)).toBe('Ripple: mapping 1 edit…')
+  expect(seen.toasts.at(-1)).toBe('Ripple: mapping uncommitted changes in 1 file…')
   expect(seen.status.at(-1)).toBe('ripple: mapping…')
   expect(seen.opened).toEqual(['ripple'])
 
-  const waiting = await $.ui.mount({ plugin: 'ripple', surface: 'terminal', component: 'Pane', requestId: 'ripple', props: PANE })
+  const waiting = await mountPane($)
   expect(await waiting.find({ type: 'Text', text: /Mapping…/ })).toBeDefined()
   await waiting.unmount()
 
@@ -204,12 +236,13 @@ test('the loop: map, report, fix a caller, see it turn green', async ($, on) => 
   const reported = await $.tool.call({ tool: 'mcp__ripple__report', ...REPORT })
   expect(String(reported.result)).toStartWith('Ripple map shown to the user: 1 changed, 6 callers, 3 need review.')
   expect(String(reported.result)).toContain('- renderCart (src/cart.ts:14): passes 1 argument; formatPrice now takes 2')
-  expect(seen.status.at(-1)).toBe('ripple: 3 need review · /ripple show')
-  expect(seen.edited).toBe(1)
+  expect(seen.status.at(-1)).toBe('ripple: 3 need review · /ripple to see the map')
+  expect(seen.store.get(`map:${ROOT}`)).toMatchObject({ method: 'lsp', print: printOf(`${PRICE_DIFF}\n`) })
 
-  const ui = await $.ui.mount({ plugin: 'ripple', surface: 'terminal', component: 'Pane', requestId: 'ripple', props: PANE })
+  const ui = await mountPane($)
   expect(await ui.find({ type: 'Text', text: 'Ripple · 1 change → 6 callers · 3 need review · via LSP' })).toBeDefined()
   expect(await ui.find({ type: 'Text', text: /Mapping…/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /has changed since this map/ })).toBeUndefined()
   expect(await ui.find({ type: 'Text', text: /^● renderCart$/ })).toMatchObject({ props: { color: 'error', bold: true } })
   expect((await ui.findAll({ type: 'Button' })).map(button => button.props.label)).toEqual([
     'Check renderCart',
@@ -219,29 +252,90 @@ test('the loop: map, report, fix a caller, see it turn green', async ($, on) => 
     'Open in browser',
   ])
 
-  // Claude fixes renderCart: the node turns green with no re-map.
-  await edit($, 'cart.ts', 'return formatPrice(total, cart.currency)')
-  expect(seen.status.at(-1)).toBe('ripple: 2 need review · 1 edit · 1 file · /ripple to map')
+  // Claude fixes renderCart, however it does it: the new hunk turns the node green.
+  seen.diff = PRICE_DIFF + CART_DIFF
+  await turn($, 'turn-1')
+  expect(seen.status.at(-1)).toBe('ripple: 2 need review · uncommitted changes in 2 files · /ripple to map')
   expect(await ui.find({ type: 'Text', text: /^✓ renderCart$/ })).toMatchObject({ props: { color: 'success' } })
   expect(await ui.find({ type: 'Text', text: /^● renderCart$/ })).toBeUndefined()
+  expect(await ui.find({ type: 'Text', text: /has changed since this map/ })).toBeDefined()
   expect((await ui.findAll({ type: 'Button' })).map(button => button.props.label)).toEqual([
     'Check renderInvoice',
     'Check emailReceipt',
     'Re-map',
     'Open in browser',
   ])
+  expect(seen.store.get(`map:${ROOT}`)).toMatchObject({ print: printOf(`${PRICE_DIFF}\n`) })
 
-  // An edit far from any flagged caller changes nothing on the map.
-  await edit($, 'ui.ts', 'unrelated')
-  expect(seen.status.at(-1)).toBe('ripple: 2 need review · 2 edits · 2 files · /ripple to map')
+  // A change far from any flagged caller turns nothing.
+  seen.diff = PRICE_DIFF + CART_DIFF + UI_DIFF
+  await turn($, 'turn-2')
+  expect(seen.status.at(-1)).toBe('ripple: 2 need review · uncommitted changes in 3 files · /ripple to map')
+  expect(await ui.find({ type: 'Text', text: /^● renderInvoice$/ })).toBeDefined()
   await ui.unmount()
 })
 
-test('a Check button asks Claude about that caller; Re-map maps again', async ($, on) => {
+test('/ripple on a diff that is already mapped shows that map and asks the model nothing', async ($, on) => {
+  const { seen, clock } = world(on)
+  seen.diff = PRICE_DIFF
+  await start($)
+  await ripple($)
+  await clock.advance(SUBMIT_AFTER_MS)
+  await $.tool.call({ tool: 'mcp__ripple__report', ...REPORT })
+  expect(seen.prompts).toHaveLength(1)
+
+  expect(await ripple($)).toEqual({})
+  await clock.advance(5_000)
+  expect(seen.prompts).toHaveLength(1)
+  expect(seen.opened.length).toBeGreaterThan(1)
+
+  // The diff moves on: the next /ripple maps again.
+  seen.diff = PRICE_DIFF + UI_DIFF
+  expect(await ripple($)).toEqual({})
+  await clock.advance(SUBMIT_AFTER_MS)
+  expect(seen.prompts).toHaveLength(2)
+  expect(seen.prompts[1]).toContain('- src/ui.ts:300: `unrelated`')
+})
+
+test('the next session shows the kept map for the same diff without asking again', async ($, on) => {
+  const { seen, clock } = world(on)
+  seen.diff = PRICE_DIFF
+  seen.store.set(`map:${ROOT}`, { ...REPORT, print: printOf(`${PRICE_DIFF}\n`) })
+  await start($)
+  expect(seen.status.at(-1)).toBe('ripple: 3 need review · /ripple to see the map')
+  expect(await ripple($)).toEqual({})
+  await clock.advance(5_000)
+  expect(seen.prompts).toEqual([])
+  expect(seen.opened).toEqual(['ripple'])
+  const ui = await mountPane($)
+  expect(await ui.find({ type: 'Text', text: /^● renderCart$/ })).toBeDefined()
+  await ui.unmount()
+})
+
+test('a change made by a shell command mid-session is seen through git and mapped', async ($, on) => {
   const { seen, clock } = world(on)
   await start($)
+  expect(seen.status.at(-1)).toBeUndefined()
+
+  // Claude runs `sed` in a turn: no Edit call, but the tree has moved.
+  seen.diff = fileDiff('crates/engine/src/game.rs', 40, '    fn drawGame(&self, frame: &mut Frame);')
+  seen.untracked = 'notes/new.rs\n'
+  await turn($, 'turn-1', 'rename gameDraw to drawGame')
+  expect(seen.status.at(-1)).toBe('ripple: uncommitted changes in 2 files · /ripple to map')
+
+  expect(await ripple($)).toEqual({})
+  await clock.advance(SUBMIT_AFTER_MS)
+  expect(seen.prompts).toHaveLength(1)
+  expect(seen.prompts[0]).toContain('- crates/engine/src/game.rs:40: `fn drawGame(&self, frame: &mut Frame);`')
+  expect(seen.prompts[0]).toContain('- notes/new.rs:1: `(new file, not yet tracked by git)`')
+})
+
+test('a Check button asks Claude about that caller; Re-map maps the same diff again', async ($, on) => {
+  const { seen, clock } = world(on)
+  seen.diff = PRICE_DIFF
+  await start($)
   await $.tool.call({ tool: 'mcp__ripple__report', ...REPORT })
-  const ui = await $.ui.mount({ plugin: 'ripple', surface: 'terminal', component: 'Pane', requestId: 'ripple', props: PANE })
+  const ui = await mountPane($)
 
   await ui.press({ key: 'check-2' })
   await clock.settle()
@@ -252,40 +346,39 @@ test('a Check button asks Claude about that caller; Re-map maps again', async ($
   await ui.press({ key: 'remap' })
   await clock.advance(SUBMIT_AFTER_MS)
   expect(seen.prompts).toHaveLength(2)
-  expect(seen.prompts[1]).toContain('trace these again too:\n- formatPrice (src/price.ts:1)')
+  expect(seen.prompts[1]).toStartWith(MAPPING_MARKER)
   expect(await ui.find({ type: 'Text', text: /Mapping…/ })).toBeDefined()
   await ui.unmount()
 })
 
 test('a mapping turn that ends with no report stops the spinner', async ($, on) => {
   const { seen, clock } = world(on)
+  seen.diff = PRICE_DIFF
   await start($)
-  await edit($, 'price.ts', 'x')
   await ripple($)
   await clock.advance(SUBMIT_AFTER_MS)
 
   await $.turn.start({ text: seen.prompts[0] ?? '', turnId: 'turn-1' })
   await $.turn.complete({ answer: '', durationMs: 5, isAborted: true, reason: 'aborted', turnId: 'turn-1' })
   expect(seen.toasts.at(-1)).toBe('Ripple: mapping ended without a map. Run /ripple to try again.')
-  expect(seen.status.at(-1)).toBe('ripple: 1 edit · 1 file · /ripple to map')
+  expect(seen.status.at(-1)).toBe('ripple: uncommitted changes in 1 file · /ripple to map')
 })
 
 test('a second /ripple while one is mapping does not ask twice', async ($, on) => {
   const { seen, clock } = world(on)
+  seen.diff = PRICE_DIFF
   await start($)
-  await edit($, 'price.ts', 'x')
   await ripple($)
   await clock.advance(SUBMIT_AFTER_MS)
-  await ripple($)
+  expect(await ripple($)).toEqual({ text: 'Ripple: already mapping.' })
   await clock.advance(5_000)
   expect(seen.prompts).toHaveLength(1)
-  expect(seen.toasts.at(-1)).toBe('Ripple: already mapping.')
 })
 
 test("the pane's Mapping line carries the spinner's word, and the spinner is left alone", async ($, on) => {
   const { seen, clock } = world(on)
+  seen.diff = PRICE_DIFF
   await start($)
-  await edit($, 'price.ts', 'x')
   await ripple($)
   await clock.advance(SUBMIT_AFTER_MS)
   await $.turn.start({ text: seen.prompts[0] ?? '', turnId: 'turn-1' })
@@ -298,7 +391,7 @@ test("the pane's Mapping line carries the spinner's word, and the spinner is lef
   })
   expect((await spinner.drawn()) as unknown).toEqual({ type: 'Text', children: ['Sauteing'] })
 
-  const pane = await $.ui.mount({ plugin: 'ripple', surface: 'terminal', component: 'Pane', requestId: 'ripple', props: PANE })
+  const pane = await mountPane($)
   expect(await pane.find({ type: 'Text', text: '◌ Mapping… Sauteing…' })).toBeDefined()
   await pane.unmount()
   await spinner.unmount()
@@ -309,23 +402,6 @@ test('a report that cannot be read is refused, and Claude is told why', async ($
   await start($)
   const refused = await $.tool.call({ tool: 'mcp__ripple__report', method: 'lsp', nodes: 'callers', edges: [] })
   expect(JSON.stringify(refused)).toContain('Ripple could not read the map: `nodes` must be an array.')
-})
-
-test('a reported map is kept for the next session', async ($, on) => {
-  const { seen } = world(on)
-  await start($)
-  await $.tool.call({ tool: 'mcp__ripple__report', ...REPORT })
-  expect(seen.store.get(`map:${ROOT}`)).toMatchObject({ method: 'lsp', edges: DEMO_MAP.edges })
-})
-
-test('the next session starts with the map the last one kept', async ($, on) => {
-  const { seen } = world(on)
-  seen.store.set(`map:${ROOT}`, REPORT)
-  await start($)
-  expect(seen.status.at(-1)).toBe('ripple: 3 need review · /ripple show')
-  const ui = await $.ui.mount({ plugin: 'ripple', surface: 'terminal', component: 'Pane', requestId: 'ripple', props: PANE })
-  expect(await ui.find({ type: 'Text', text: /^● renderCart$/ })).toBeDefined()
-  await ui.unmount()
 })
 
 test('/ripple demo draws the canned map on every surface, with no model call', async ($, on) => {
@@ -367,31 +443,25 @@ test('/ripple demo draws the canned map on every surface, with no model call', a
 test('/ripple web writes the page and opens it', async ($, on) => {
   const { seen } = world(on)
   await start($)
-  await ripple($, 'web')
+  expect((await ripple($, 'web')).text).toContain('no map to export yet')
   expect(seen.files.size).toBe(0)
-  expect(seen.toasts.at(-1)).toContain('no map to export yet')
 
   await ripple($, 'demo')
-  await ripple($, ' WEB ')
+  expect(await ripple($, ' WEB ')).toEqual({ text: 'Ripple: opened .ripple/graph.html' })
   expect([...seen.files.keys()]).toEqual([`${ROOT}/.ripple/graph.html`])
   expect(seen.files.get(`${ROOT}/.ripple/graph.html`)).toStartWith('<!doctype html>')
   expect(seen.ran).toEqual([['rundll32', 'url.dll,FileProtocolHandler', 'C:\\repo\\shop\\.ripple\\graph.html']])
-  expect(seen.toasts.at(-1)).toBe('Ripple: opened .ripple/graph.html')
 })
 
-test('/ripple reset clears the edits, the map and the pane', async ($, on) => {
+test('/ripple reset clears the map and the pane; other words print the usage', async ($, on) => {
   const { seen } = world(on)
+  seen.diff = PRICE_DIFF
   await start($)
-  await edit($, 'price.ts', 'x')
   await $.tool.call({ tool: 'mcp__ripple__report', ...REPORT })
-  await edit($, 'ui.ts', 'y')
-  await ripple($, 'reset')
-  expect(seen.status.at(-1)).toBeUndefined()
+  expect(await ripple($, 'reset')).toEqual({ text: 'Ripple: cleared the map.' })
+  expect(seen.status.at(-1)).toBe('ripple: uncommitted changes in 1 file · /ripple to map')
   expect(seen.closed).toEqual(['ripple'])
   expect(seen.store.has(`map:${ROOT}`)).toBe(false)
 
-  await ripple($, 'show')
-  expect(seen.toasts.at(-1)).toContain('no map yet')
-  await ripple($, 'nonsense')
-  expect(seen.toasts.at(-1)).toContain('/ripple maps recent edits')
+  expect((await ripple($, 'show')).text).toContain('/ripple maps your uncommitted changes')
 })

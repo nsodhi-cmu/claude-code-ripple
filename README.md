@@ -1,12 +1,12 @@
 # Ripple
 
-**See what Claude's edits reach.** Ripple is a Claude Code mod. When Claude changes a function, Ripple maps everything that depends on it, draws the map inside Claude Code, and hands Claude the callers it may have broken, so it checks them before it says "done."
+**See what your changes reach.** Ripple is a Claude Code mod. Run `/ripple` and it maps everything that depends on the functions your uncommitted changes touch, draws the map inside Claude Code, and hands Claude the callers that may be broken, so it checks them before it says "done."
 
 ![Ripple mapping an edit and turning fixed callers green](docs/demo.gif)
 
 Coding agents edit fast, and an edit's reach is invisible: change one function's signature and callers in other files break silently. Call-graph tools for agents exist, but they run outside Claude Code, Claude has to remember to call them, and they draw in a browser. Ripple lives inside the session:
 
-- **It tracks edits by itself.** Every `Edit` and `Write` is noted; the status line says `ripple: 1 edit · 1 file · /ripple to map`.
+- **It maps the diff, whoever made it.** Ripple reads `git diff`, so a change counts however it was made: Claude's edit, a `sed` Claude ran in the shell, your own typing, another session. The status line says `ripple: uncommitted changes in 3 files · /ripple to map`.
 - **It maps in any language.** Ripple asks Claude to trace the impact with the tools the repository already has, so there is nothing to configure per language.
 - **It draws the map natively.** A tree in the terminal, concentric rings in the desktop app.
 - **It closes the loop.** The callers that need review go back to Claude, and each one turns green as Claude fixes it.
@@ -28,15 +28,16 @@ Answer `y` to add the marketplace, then pick a scope. The same in two steps:
 
 ## Use
 
-Ask Claude for a change, then run `/ripple`.
+Change something (or ask Claude to), then run `/ripple`.
 
 | Command | What it does |
 | :- | :- |
-| `/ripple` | Asks Claude to map the edits made since the last map, and opens the pane. |
-| `/ripple show` | Opens the pane with the last map. |
+| `/ripple` | Shows the map of your uncommitted changes. If this diff is not mapped yet, it asks Claude to map it first. |
 | `/ripple demo` | Shows a canned map. No model call, works offline. |
 | `/ripple web` | Writes `.ripple/graph.html` (the ring view) and opens it in a browser. |
-| `/ripple reset` | Clears the tracked edits and the map. |
+| `/ripple reset` | Clears the map. |
+
+`/ripple` is the only command you need. Run it again on the same diff and the map comes straight back, with no model call; run it after the diff has changed and Claude maps the new one.
 
 The pane opens docked beside the transcript in a wide terminal, and above the prompt in a narrow one:
 
@@ -54,14 +55,14 @@ Ripple · 1 change → 6 callers · 3 need review · via LSP
 ```
 
 - **Amber** is what changed, **red** needs review, **green** was updated since the map, and plain is fine.
-- **Check** asks Claude about that one caller. **Re-map** traces the same change again.
+- **Check** asks Claude about that one caller. **Re-map** has Claude map the same diff again.
 - Give the pane the keyboard (click it, or `ctrl+x tab`) and the digits and letters press the buttons.
 
 In the desktop app's Code tab the same map is drawn as rings: the changed function at the center, what it calls on a dashed inner ring, its callers on the next ring and their callers on the outer one. Edges into a caller that needs review are red, and untested functions have a dashed outline.
 
 ## How mapping works
 
-`/ripple` sends Claude one prompt. It asks for every function the edits changed, their callers to depth 2 and their callees to depth 1, found with the most precise tool the repository offers:
+Ripple reads the working tree's uncommitted changes with `git diff HEAD`, plus the files git does not track yet. It does not watch Claude's tools. `/ripple` sends Claude one prompt that lists those changes and asks for every function they touched, their callers to depth 2 and their callees to depth 1, found with the most precise tool the repository offers:
 
 1. **The language server.** Claude's `LSP` tool: `prepareCallHierarchy`, then `incomingCalls` and `outgoingCalls`.
 2. **The language's own checker.** `tsc --noEmit`, `cargo check`, `go vet`, `pyright` and the like. After a signature change, its errors point straight at the broken callers.
@@ -69,7 +70,7 @@ In the desktop app's Code tab the same map is drawn as rings: the changed functi
 
 Claude then calls Ripple's one tool, `mcp__ripple__report`, with the map. The header says which of the three it relied on (`via LSP`, `via type checker`, `via text search`), which is how far to trust the map. A map holds at most 40 functions.
 
-The tool's answer lists the callers that need review and tells Claude to open, check and fix each one. From then on Ripple watches the edits: one in the same file that names a flagged caller, or lands within 15 lines of it, turns that caller green. Nothing is mapped again for that.
+The tool's answer lists the callers that need review and tells Claude to open, check and fix each one. After each turn Ripple reads the diff again: a new change in the same file that names a flagged caller, or lands within 15 lines of it, turns that caller green. Nothing is mapped again for that.
 
 Mapping costs one model turn, so it runs when you ask for it and never by itself.
 
@@ -98,7 +99,7 @@ cd examples/ts-shop        # or examples/rust-shop
 claude --plugin-dir ../../ripple
 ```
 
-Then ask: `Add a currency parameter to formatPrice. Only edit src/price.ts.` (in the Rust project, `format_price` and `src/price.rs`), and run `/ripple`.
+Then ask: `Add a currency parameter to formatPrice. Only edit src/price.ts.` (in the Rust project, `format_price` and `src/price.rs`), or make that edit yourself, and run `/ripple`.
 
 For the most precise maps, install a language server plugin for the language (for example `vtsls` or `rust-analyzer` from the `boostvolt/claude-code-lsps` marketplace) and put the server on your `PATH`. Without one, Ripple still works: Claude falls back to the type checker, then to text search.
 
@@ -114,8 +115,8 @@ claude plugin test ./ripple
 .claude-plugin/marketplace.json   makes this repository a marketplace
 ripple/
   .claude-plugin/plugin.json      the manifest
-  hooks/register.tsx              the hooks: edit tracking, /ripple, the report tool, the pane
-  hooks/model.ts                  the map: reading a report, the prompts, which edit touches which caller
+  hooks/register.tsx              the hooks: reading git, /ripple, the report tool, the pane
+  hooks/model.ts                  the map: reading a diff and a report, the prompts, which change touches which caller
   hooks/render.ts                 the tree view and the SVG ring view
   hooks/demo.ts                   the canned map
   hooks/*.test.ts                 unit tests, and the whole loop driven through the engine
@@ -131,14 +132,16 @@ A mod is code that runs inside Claude Code, unsandboxed, with your permissions: 
 
 What Ripple does with that access:
 
-- **Reads** the arguments and results of Claude's `Edit`, `Write` and `NotebookEdit` calls, which it keeps for the session. It also sees each prompt's text as a turn starts, only to recognise its own mapping prompt, and keeps none of it.
+- **Reads** your uncommitted changes, by running `git diff HEAD` and `git ls-files --others` (both read-only) at session start, after each turn and on `/ripple`. It also sees each prompt's text as a turn starts, only to recognise its own mapping prompt, and keeps none of it.
 - **Stores** the last map per project in the mod's own store, under your Claude Code configuration directory.
 - **Writes** one file, `.ripple/graph.html`, and only when you run `/ripple web`.
-- **Runs** one command, your system's file opener (`open`, `xdg-open`, or `rundll32` on Windows), and only for `/ripple web`.
+- **Runs** one more command, your system's file opener (`open`, `xdg-open`, or `rundll32` on Windows), and only for `/ripple web`.
 - **Sends prompts** to Claude when you run `/ripple` or press a button. It makes no network requests of its own.
 
 ## Limits
 
+- Ripple maps everything uncommitted, not only the latest change: git cannot say which command made which change. Commit or stash the rest to map one change alone.
+- It needs git: outside a repository, or with everything committed, there is no diff to map.
 - A caller Claude checked and found correct stays red, since nothing was edited. Re-map to refresh it.
 - The map is as good as the tool behind it. Calls through dynamic dispatch, reflection or strings can be missed, most of all when the map is `via text search`.
 - One repository at a time.

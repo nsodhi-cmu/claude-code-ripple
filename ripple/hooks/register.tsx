@@ -1,23 +1,24 @@
 import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, RenderElement } from 'claude-code'
 
-import type { RippleMap, RippleNode } from '../types'
+import type { RippleEdit, RippleMap, RippleNode } from '../types'
 import { SENTRY_DEMO_MAP } from './demo'
 import {
   MAPPING_MARKER,
-  MAX_EDITS,
   REPORT_DESCRIPTION,
   REPORT_SCHEMA,
-  SNIPPET_CHARS,
   checkPrompt,
-  firstChangedLine,
+  fileCount,
   headerText,
+  hunkKey,
   mappingPrompt,
   markUpdated,
   needsReview,
+  newFileHunks,
+  parseDiff,
   plural,
-  readPatch,
-  relativeTo,
+  printOf,
+  readStored,
   reportText,
   sanitizeMap,
   slash,
@@ -27,8 +28,14 @@ import {
 import { graphHtml, layoutTree, ringSvg, treeRows } from './render'
 import type { Segment, TreeLine } from './render'
 
+// Ripple maps the working tree's uncommitted changes, read from git. It does
+// not watch Claude's tools: a change is a change however it was made (an Edit,
+// a `sed` in the shell, your own typing), and `git diff HEAD` has them all.
+
 const PANE = 'ripple'
-const USAGE = 'Ripple: /ripple maps recent edits · show · demo · web · reset'
+const USAGE = 'Ripple: /ripple maps your uncommitted changes · /ripple demo · web · reset'
+const NO_CHANGES =
+  'Ripple: nothing to map. Git shows no uncommitted changes here. Change something (or ask Claude to), then run /ripple.'
 /** When the mapping prompt is tried after it was asked for, in milliseconds. */
 const SUBMIT_WAITS: readonly number[] = [120, 500, 1500]
 /** A second ask this soon after the first, while it still maps, is a double press. */
@@ -36,8 +43,14 @@ const ASK_AGAIN_MS = 120_000
 
 /** When mapping was last asked for; a reload forgets it, which lets a stuck one be asked again. */
 let askedAt = 0
+/** The working tree against HEAD, as git last said: one entry per hunk, and a print of it all. */
+let tree: { hunks: RippleEdit[]; print: string } = { hunks: [], print: '' }
+/**
+ * The hunks the tree held when the map was made, by key. A hunk that is not
+ * among them came after the map: that is how a fix is told from the change.
+ */
+let mappedHunks: Set<string> | undefined
 
-const edits = atom({ plugin: 'ripple', key: 'edits' } as const, [])
 const map = atom({ plugin: 'ripple', key: 'map' } as const, null)
 const mapping = atom({ plugin: 'ripple', key: 'mapping' } as const, false)
 
@@ -62,8 +75,32 @@ const persist = async ($: EngineInterface, value: RippleMap | null): Promise<voi
   }
 }
 
+/** One read-only git command under the session's root; its output, or '' when it fails. */
+const git = async ($: EngineInterface, args: readonly string[]): Promise<string> => {
+  try {
+    const ran = await $.process.run(['git', ...args], { cwd: await $.session.root(), timeoutMs: 20_000 })
+    return ran.exitCode === 0 ? ran.stdout : ''
+  } catch {
+    return ''
+  }
+}
+
+/** Reads the uncommitted changes: the diff against HEAD, and the files git does not track yet. */
+const readTree = async ($: EngineInterface): Promise<void> => {
+  const diff = await git($, ['diff', 'HEAD', '--relative', '--unified=0', '--no-color', '--no-ext-diff'])
+  const fresh = await git($, ['ls-files', '--others', '--exclude-standard'])
+  const at = await $.clock.now()
+  const hunks = [...parseDiff(diff, at), ...newFileHunks(fresh, at)]
+  tree = { hunks, print: hunks.length === 0 ? '' : printOf(`${diff}\n${fresh}`) }
+}
+
+/** How many files hold changes the map on hand was not made from. */
+const unmappedFiles = (held: RippleMap | null): number =>
+  held !== null && held.print === tree.print ? 0 : fileCount(tree.hunks)
+
 const refreshStatus = async ($: EngineInterface): Promise<void> => {
-  $.ui.status(statusText(await read($, edits), await read($, map), await read($, mapping)))
+  const held = await read($, map)
+  $.ui.status(statusText(held, await read($, mapping), unmappedFiles(held)))
 }
 
 /** Rows the pane wants while it sits inline above the prompt. */
@@ -83,7 +120,7 @@ const openPane = async ($: EngineInterface): Promise<void> => {
       columns: 64,
       rows: paneRows(await read($, map)),
     })
-    if (!opened.isPlaced) $.ui.toast('Ripple: the map is ready. Run /ripple show to open it.')
+    if (!opened.isPlaced) $.ui.toast('Ripple: the map is ready. Run /ripple to open it.')
   } catch (error) {
     $.ui.log(`ripple: could not open the pane: ${describe(error)}`, { to: 'debug' })
   }
@@ -122,34 +159,46 @@ const submitMapping = ($: EngineInterface, text: string, waits: readonly number[
 }
 
 /**
- * Asks Claude to map. The prompt is queued, never awaited: it starts a turn of
- * its own once the session is idle.
+ * /ripple: shows the map of the uncommitted changes. The map on hand is shown
+ * as it is when it was made from this very diff; else Claude is asked to map
+ * (one model turn), and `isForced` asks even then. The prompt is queued, never
+ * awaited. Resolves to why there is nothing to show, for the caller to say.
  */
-const startMapping = async ($: EngineInterface, isRemap: boolean): Promise<void> => {
-  const pending = await read($, edits)
+const showMap = async ($: EngineInterface, isForced: boolean): Promise<string | undefined> => {
+  await readTree($)
+  await refreshStatus($)
+  if (tree.hunks.length === 0) return NO_CHANGES
   const held = await read($, map)
-  const previous =
-    isRemap && held !== null && held.isDemo !== true
-      ? held.nodes.filter(node => node.kind === 'changed')
-      : []
-  if (pending.length === 0 && previous.length === 0) {
-    $.ui.toast('Ripple: no edits to map yet.')
-    return
-  }
+  if (!isForced && held !== null && held.print === tree.print) return undefined
   const now = await $.clock.now()
-  if ((await read($, mapping)) && now - askedAt < ASK_AGAIN_MS) {
-    $.ui.toast('Ripple: already mapping.')
-    return
-  }
+  if ((await read($, mapping)) && now - askedAt < ASK_AGAIN_MS) return 'Ripple: already mapping.'
   askedAt = now
   await update($, mapping, () => true)
-  $.ui.status(statusText(pending, held, true))
-  $.ui.toast(
-    pending.length > 0
-      ? `Ripple: mapping ${plural(pending.length, 'edit')}…`
-      : `Ripple: mapping ${plural(previous.length, 'change')} again…`,
-  )
-  submitMapping($, mappingPrompt(pending, previous), SUBMIT_WAITS)
+  $.ui.status(statusText(held, true, 0))
+  $.ui.toast(`Ripple: mapping uncommitted changes in ${plural(fileCount(tree.hunks), 'file')}…`)
+  submitMapping($, mappingPrompt(tree.hunks), SUBMIT_WAITS)
+  return undefined
+}
+
+/**
+ * Turns flagged callers green from the diff alone: a hunk the tree did not
+ * hold when the map was made is a change that came after it, and one that
+ * lands on a caller that needs review is taken as its fix.
+ */
+const markFixes = async ($: EngineInterface): Promise<void> => {
+  const held = await read($, map)
+  if (held === null || held.isDemo === true || mappedHunks === undefined) return
+  const known = mappedHunks
+  const later = tree.hunks.filter(hunk => !known.has(hunkKey(hunk)))
+  if (later.length === 0) return
+  for (const hunk of later) known.add(hunkKey(hunk))
+  const turned = later.reduce((current, hunk) => markUpdated(current, touchOf(hunk)).map, held)
+  if (turned === held) return
+  const after = await update($, map, () => turned)
+  await persist($, after)
+  if (after !== null && needsReview(after).length === 0) {
+    $.ui.toast('Ripple: every flagged caller has been updated.')
+  }
 }
 
 const openInBrowser = async ($: EngineInterface, path: string): Promise<boolean> => {
@@ -171,16 +220,14 @@ const openInBrowser = async ($: EngineInterface, path: string): Promise<boolean>
   return false
 }
 
-const writeWeb = async ($: EngineInterface): Promise<void> => {
+/** Writes and opens the web page; resolves to what happened, for the caller to say. */
+const writeWeb = async ($: EngineInterface): Promise<string> => {
   const held = await read($, map)
-  if (held === null) {
-    $.ui.toast('Ripple: no map to export yet. Run /ripple first, or /ripple demo.')
-    return
-  }
+  if (held === null) return 'Ripple: no map to export yet. Run /ripple first, or /ripple demo.'
   const path = `${slash(await $.session.root()).replace(/\/+$/, '')}/.ripple/graph.html`
   await $.fs.write(path, graphHtml(held))
   const isOpen = await openInBrowser($, path)
-  $.ui.toast(isOpen ? 'Ripple: opened .ripple/graph.html' : `Ripple: wrote ${path}; open it in a browser.`)
+  return isOpen ? 'Ripple: opened .ripple/graph.html' : `Ripple: wrote ${path}; open it in a browser.`
 }
 
 const styleOf = (segment: Segment): Record<string, string | boolean> => {
@@ -246,43 +293,7 @@ export const register: Register = on => {
   /** The word the spinner shows this turn, drawn beside "Mapping…". */
   let spinnerWord = ''
 
-  // 1. Track edits: let the edit run, then record it and turn reviewed callers green.
-  on('tool.call', { tool: ['Edit', 'Write', 'NotebookEdit'] }, async ($, e, next) => {
-    const ran = await next(e)
-    if (ran.deny !== undefined || ran.isError === true) return ran
-    try {
-      const path = e.tool === 'NotebookEdit' ? e.notebook_path : e.file_path
-      const text = e.tool === 'Edit' ? e.new_string : e.tool === 'Write' ? e.content : e.new_source
-      const file = relativeTo(await $.session.root(), path)
-      const hunks = readPatch(ran.result)
-      const line = firstChangedLine(hunks)
-      const at = await $.clock.now()
-      await update($, edits, held =>
-        [
-          ...held,
-          { file, snippet: text.slice(0, SNIPPET_CHARS), at, ...(line === undefined ? {} : { line }) },
-        ].slice(-MAX_EDITS),
-      )
-
-      const touch = touchOf(file, text, hunks)
-      const before = await read($, map)
-      if (before !== null && markUpdated(before, touch).updated.length > 0) {
-        const after = await update($, map, held =>
-          held === null ? held : markUpdated(held, touch).map,
-        )
-        await persist($, after)
-        if (after !== null && needsReview(after).length === 0) {
-          $.ui.toast('Ripple: every flagged caller has been updated.')
-        }
-      }
-      await refreshStatus($)
-    } catch (error) {
-      $.ui.log(`ripple: could not record an edit: ${describe(error)}`, { to: 'debug' })
-    }
-    return ran
-  })
-
-  // 2. Session start: the report tool, the last map, and (last) the command.
+  // 1. Session start: the report tool, the last map, the tree, and (last) the command.
   on('session.start', async ($, e, next) => {
     try {
       await $.tool.register({
@@ -292,9 +303,10 @@ export const register: Register = on => {
         isDeferred: false,
       })
       if ((await read($, map)) === null) {
-        const kept = sanitizeMap(await $.store.get(await storeKey($)))
-        if (!('error' in kept) && kept.map.nodes.length > 0) await update($, map, () => kept.map)
+        const kept = readStored(await $.store.get(await storeKey($)))
+        if (kept !== null) await update($, map, () => kept)
       }
+      await readTree($)
       await refreshStatus($)
     } catch (error) {
       $.ui.log(`ripple: session start: ${describe(error)}`, { to: 'debug' })
@@ -302,8 +314,8 @@ export const register: Register = on => {
     try {
       await $.command.register({
         name: 'ripple',
-        description: "Map what Claude's recent edits reach",
-        argumentHint: '[show|demo|web|reset]',
+        description: 'Map what your uncommitted changes reach',
+        argumentHint: '[demo|web|reset]',
       })
     } catch (error) {
       $.ui.log(`ripple: could not register /ripple: ${describe(error)}`, { to: 'debug' })
@@ -311,44 +323,42 @@ export const register: Register = on => {
     return next(e)
   })
 
-  // 3. /ripple. Every branch returns {}: returned text would go to the transcript.
+  // 2. /ripple. A branch that opens the pane returns {}; one with nothing to
+  // show prints why, since a command that answers with a toast alone looks dead.
   on('command.run', { command: 'ripple' }, async ($, e) => {
+    let said: string | undefined
     try {
       const verb = (typeof e.args === 'string' ? e.args : '').trim().split(/\s+/)[0]?.toLowerCase() ?? ''
       if (verb === '') {
-        await startMapping($, false)
-        if (await read($, mapping)) await openPane($)
-      } else if (verb === 'show') {
-        if ((await read($, map)) === null && !(await read($, mapping))) {
-          $.ui.toast('Ripple: no map yet. Run /ripple after Claude edits something, or /ripple demo.')
-        } else {
-          await openPane($)
-        }
+        said = await showMap($, false)
+        if (said === undefined) await openPane($)
       } else if (verb === 'demo') {
         await update($, mapping, () => false)
         await update($, map, () => SENTRY_DEMO_MAP)
+        mappedHunks = undefined
         await refreshStatus($)
         await openPane($)
       } else if (verb === 'reset') {
-        await update($, edits, () => [])
         await update($, map, () => null)
         await update($, mapping, () => false)
+        mappedHunks = undefined
         await persist($, null)
+        await readTree($)
         await refreshStatus($)
         await $.ui.close({ id: PANE }).catch(() => undefined)
-        $.ui.toast('Ripple: cleared the edits and the map.')
+        said = 'Ripple: cleared the map.'
       } else if (verb === 'web') {
-        await writeWeb($)
+        said = await writeWeb($)
       } else {
-        $.ui.toast(USAGE)
+        said = USAGE
       }
     } catch (error) {
-      $.ui.toast(`Ripple: /ripple failed (${describe(error)}).`)
+      said = `Ripple: /ripple failed (${describe(error)}).`
     }
-    return {}
+    return said === undefined ? {} : { text: said }
   })
 
-  // 4. The report tool: save the map, show it, and tell Claude what to check.
+  // 3. The report tool: save the map, show it, and tell Claude what to check.
   on('tool.call', { tool: 'mcp__ripple__report' }, async ($, e) => {
     const reported = sanitizeMap({ method: e.method, nodes: e.nodes, edges: e.edges })
     if ('error' in reported) {
@@ -357,10 +367,13 @@ export const register: Register = on => {
       }
     }
     try {
-      await update($, map, () => reported.map)
-      await update($, edits, () => [])
+      // The map is of the tree as it stands now: remember that diff and its hunks.
+      await readTree($)
+      mappedHunks = new Set(tree.hunks.map(hunkKey))
+      const made: RippleMap = { ...reported.map, print: tree.print }
+      await update($, map, () => made)
       await update($, mapping, () => false)
-      await persist($, reported.map)
+      await persist($, made)
       await refreshStatus($)
       void openPane($)
     } catch (error) {
@@ -369,23 +382,31 @@ export const register: Register = on => {
     return { result: reportText(reported.map, reported.notes) }
   })
 
-  // A mapping turn that ends with no report (interrupted, refused) stops the spinner.
   on('turn.start', ($, e, next) => {
     if (e.text.includes(MAPPING_MARKER)) mappingTurn = e.turnId
     return next(e)
   })
 
+  // 4. After every turn: look at the tree again. A mapping turn that ended with
+  // no report stops the spinner; changes made since the map turn callers green.
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
-    if (e.agentId === undefined && e.turnId === mappingTurn) {
-      mappingTurn = undefined
-      try {
+    if (e.agentId !== undefined) return done
+    try {
+      if (e.turnId === mappingTurn) {
+        mappingTurn = undefined
         if (await read($, mapping)) {
           await stopMapping($, 'Ripple: mapping ended without a map. Run /ripple to try again.')
         }
-      } catch (error) {
-        $.ui.log(`ripple: turn end: ${describe(error)}`, { to: 'debug' })
       }
+      const before = tree.print
+      await readTree($)
+      await markFixes($)
+      await refreshStatus($)
+      // The pane says when the tree has moved past its map, which no state write tells it.
+      if (tree.print !== before) $.ui.invalidate('ui.render')
+    } catch (error) {
+      $.ui.log(`ripple: turn end: ${describe(error)}`, { to: 'debug' })
     }
     return done
   })
@@ -404,8 +425,8 @@ export const register: Register = on => {
   on('ui.render', { component: 'Pane', requestId: 'ripple' }, async ($, e) => {
     const held = await read($, map)
     const isMapping = await read($, mapping)
-    const pending = await read($, edits)
     const columns = Math.max(24, e.props.bodyColumns)
+    const isStale = held !== null && held.isDemo !== true && unmappedFiles(held) > 0
 
     const run = (work: Promise<void>): void => {
       void work.catch((error: unknown) => $.ui.toast(`Ripple: ${describe(error)}`))
@@ -416,13 +437,17 @@ export const register: Register = on => {
         $.ui.toast(`Ripple: asked Claude to check ${node.name}.`)
         run($.prompt.submit({ text: checkPrompt(node, held), asUser: true }).then(() => undefined))
       },
-      remap: () => run(startMapping($, true)),
-      web: () => run(writeWeb($)),
+      remap: () =>
+        run(
+          showMap($, true).then(said => {
+            if (said !== undefined) $.ui.toast(said)
+          }),
+        ),
+      web: () => run(writeWeb($).then(said => $.ui.toast(said))),
     }
 
     const kit: Kit = $.ui.resolve(e)
     const { Box, Text } = kit
-    const unmapped = `${plural(pending.length, 'edit')} ${held === null ? 'not mapped yet' : 'since this map'} · /ripple to map ${pending.length === 1 ? 'it' : 'them'}`
     const inSentry = held === null ? 0 : held.nodes.filter(node => node.sentry !== undefined).length
     const top = (
       <Box flexDirection="column">
@@ -430,17 +455,19 @@ export const register: Register = on => {
         {isMapping && (
           <Text color="warning">{`◌ Mapping…${spinnerWord === '' ? '' : ` ${spinnerWord}…`}`}</Text>
         )}
-        {!isMapping && pending.length > 0 && <Text dimColor>{unmapped}</Text>}
+        {!isMapping && isStale && (
+          <Text dimColor>The working tree has changed since this map · /ripple to map it again</Text>
+        )}
         {inSentry > 0 && (
           <Text color="magenta">{`Sentry: ${plural(inSentry, 'function')} here already failing in production`}</Text>
         )}
       </Box>
     )
-    const empty = held === null && !isMapping && pending.length === 0 && (
-      <Text dimColor>No map yet. Run /ripple after Claude edits something, or /ripple demo.</Text>
+    const empty = held === null && !isMapping && (
+      <Text dimColor>No map yet. Run /ripple to map your uncommitted changes.</Text>
     )
     const nothing = held !== null && held.nodes.length === 0 && (
-      <Text dimColor>The last edits changed no function.</Text>
+      <Text dimColor>The changes touched no function.</Text>
     )
 
     if (e.surface === 'terminal') {

@@ -32,23 +32,24 @@ export type RippleMap = {
   edges: RippleEdge[]
   /** Set on the canned `/ripple demo` map, which is never persisted. */
   isDemo?: boolean
+  /** The print of the uncommitted diff this map was made from; the same diff needs no new map. */
+  print?: string
 }
 
-/** One edit Claude made since the last map. */
+/** One hunk of the working tree's uncommitted diff, as `git diff HEAD` has it. */
 export type RippleEdit = {
   file: string
-  /** The first 400 characters of the new text. */
+  /** The first 400 characters of the added text. */
   snippet: string
-  /** 1-based line of the first changed line, when the tool's patch says. */
+  /** 1-based line the hunk starts at in the file as it stands. */
   line?: number
-  /** Milliseconds since the epoch. */
+  /** Milliseconds since the epoch, when the diff was read. */
   at: number
 }
 
 declare module 'claude-code' {
   interface PluginState {
     ripple: {
-      edits: RippleEdit[]
       map: RippleMap | null
       mapping: boolean
     }
