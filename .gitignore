@@ -1,0 +1,12 @@
+# The build spec stays local.
+ripple-spec.md
+
+# What `/ripple web` writes into a project.
+.ripple/
+
+# Laid by Claude Code each time it loads the mod, for this exact version.
+ripple/.claude-plugin/types/
+
+# Example project builds.
+target/
+node_modules/
