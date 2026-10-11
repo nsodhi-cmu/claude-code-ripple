@@ -1,0 +1,14 @@
+{
+  "name": "claude-code-ripple",
+  "owner": { "name": "Neal", "url": "https://github.com/nsodhi-cmu" },
+  "metadata": {
+    "description": "Ripple: see what Claude's edits reach, inside Claude Code."
+  },
+  "plugins": [
+    {
+      "name": "ripple",
+      "source": "./ripple",
+      "description": "See what Claude's edits reach"
+    }
+  ]
+}
