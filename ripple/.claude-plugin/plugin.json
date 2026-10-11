@@ -1,0 +1,9 @@
+{
+  "name": "ripple",
+  "version": "0.1.0",
+  "description": "See what Claude's edits reach",
+  "author": { "name": "Neal", "url": "https://github.com/nsodhi-cmu" },
+  "repository": "https://github.com/nsodhi-cmu/claude-code-ripple",
+  "license": "Apache-2.0",
+  "types": "./types/index.d.ts"
+}
