@@ -2,7 +2,7 @@ import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, RenderElement } from 'claude-code'
 
 import type { RippleMap, RippleNode } from '../types'
-import { DEMO_MAP } from './demo'
+import { SENTRY_DEMO_MAP } from './demo'
 import {
   MAPPING_MARKER,
   MAX_EDITS,
@@ -218,6 +218,7 @@ const legend = ({ Box, Text }: Kit, isRings: boolean): RenderElement => (
     <Text>○ ok</Text>
     {isRings && <Text dimColor>dashed outline: untested</Text>}
     {isRings && <Text dimColor>inner ring: what it calls</Text>}
+    {isRings && <Text color="magenta">purple halo: Sentry issues</Text>}
   </Box>
 )
 
@@ -325,7 +326,7 @@ export const register: Register = on => {
         }
       } else if (verb === 'demo') {
         await update($, mapping, () => false)
-        await update($, map, () => DEMO_MAP)
+        await update($, map, () => SENTRY_DEMO_MAP)
         await refreshStatus($)
         await openPane($)
       } else if (verb === 'reset') {
@@ -422,6 +423,7 @@ export const register: Register = on => {
     const kit: Kit = $.ui.resolve(e)
     const { Box, Text } = kit
     const unmapped = `${plural(pending.length, 'edit')} ${held === null ? 'not mapped yet' : 'since this map'} · /ripple to map ${pending.length === 1 ? 'it' : 'them'}`
+    const inSentry = held === null ? 0 : held.nodes.filter(node => node.sentry !== undefined).length
     const top = (
       <Box flexDirection="column">
         <Text bold>{held === null ? 'Ripple' : headerText(held)}</Text>
@@ -429,6 +431,9 @@ export const register: Register = on => {
           <Text color="warning">{`◌ Mapping…${spinnerWord === '' ? '' : ` ${spinnerWord}…`}`}</Text>
         )}
         {!isMapping && pending.length > 0 && <Text dimColor>{unmapped}</Text>}
+        {inSentry > 0 && (
+          <Text color="magenta">{`Sentry: ${plural(inSentry, 'function')} here already failing in production`}</Text>
+        )}
       </Box>
     )
     const empty = held === null && !isMapping && pending.length === 0 && (

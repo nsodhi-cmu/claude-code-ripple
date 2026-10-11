@@ -115,3 +115,27 @@ export const DEMO_MAP: RippleMap = {
     { from: 'src/price.ts:formatPrice', to: 'src/price.ts:currencySymbol' },
   ],
 }
+
+/**
+ * The same map with what Sentry MCP would add: canned production issues on two
+ * of the flagged callers. `/ripple demo` shows this one, so the Sentry badges
+ * can be seen with no Sentry account connected.
+ */
+export const SENTRY_DEMO_MAP: RippleMap = {
+  ...DEMO_MAP,
+  nodes: DEMO_MAP.nodes.map(node => {
+    if (node.name === 'renderCart') {
+      return {
+        ...node,
+        sentry: { count: 2, issue: 'SHOP-1A', title: "TypeError: cannot read 'currency' of undefined in renderCart" },
+      }
+    }
+    if (node.name === 'emailReceipt') {
+      return {
+        ...node,
+        sentry: { count: 1, issue: 'SHOP-2F', title: 'Receipt email shows the wrong currency symbol' },
+      }
+    }
+    return node
+  }),
+}

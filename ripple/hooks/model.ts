@@ -71,6 +71,17 @@ export const REPORT_SCHEMA: Record<string, unknown> = {
           },
           tested: { type: 'boolean', description: 'True when any test file references it.' },
           reason: { type: 'string', description: 'One line. Required when status is needs-review.' },
+          sentry: {
+            type: 'object',
+            description:
+              'Only when Sentry MCP tools are connected and Sentry has unresolved issues in this function.',
+            required: ['count'],
+            properties: {
+              count: { type: 'integer', description: 'How many unresolved issues.' },
+              issue: { type: 'string', description: 'The top issue id, like SHOP-12.' },
+              title: { type: 'string', description: 'That issue, in one line.' },
+            },
+          },
         },
       },
     },
@@ -292,6 +303,13 @@ export function countsOf(map: RippleMap): Counts {
   return counts
 }
 
+/** `Sentry: 2 issues · SHOP-12`, or '' for a node Sentry has nothing on. */
+export function sentryNote(node: RippleNode): string {
+  if (node.sentry === undefined || node.sentry.count <= 0) return ''
+  const id = node.sentry.issue === undefined ? '' : ` · ${node.sentry.issue}`
+  return `Sentry: ${plural(node.sentry.count, 'issue')}${id}`
+}
+
 export function needsReview(map: RippleMap): RippleNode[] {
   return map.nodes.filter(node => node.status === 'needs-review')
 }
@@ -392,6 +410,13 @@ export function mappingPrompt(edits: RippleEdit[], previous: RippleNode[] = []):
     '',
     '4. Set tested = true if any test file references the node.',
     '',
+    '4b. If Sentry MCP tools are connected (tool names containing "sentry"), search Sentry once',
+    '   for unresolved issues whose stack traces touch the changed functions or their callers',
+    '   (search by file name and function name). For each node that has any, set',
+    '   sentry = { count, issue, title } and set its status to "needs-review": a caller that is',
+    '   already failing in production is the riskiest one to leave unchecked. If no Sentry tool',
+    '   is connected or it asks for sign-in, skip this step without comment.',
+    '',
     `5. Cap the map at ${MAX_NODES} nodes. If you must cut, keep needs-review and depth-1 nodes first.`,
     '',
     `6. Call ${REPORT_TOOL} exactly once with the map. Set method to the tool you`,
@@ -420,8 +445,9 @@ export function reportText(map: RippleMap, notes: string[] = []): string {
   if (review.length > 0) {
     lines.push('Needs review:')
     for (const node of review) {
+      const live = node.sentry === undefined ? '' : ` [${sentryNote(node)}: already failing in production]`
       lines.push(
-        `- ${node.name} (${node.file}:${node.line}): ${node.reason ?? 'may be affected by the change'}`,
+        `- ${node.name} (${node.file}:${node.line}): ${node.reason ?? 'may be affected by the change'}${live}`,
       )
     }
     lines.push(
@@ -454,7 +480,14 @@ function readNode(raw: unknown): RippleNode | undefined {
   const depth = kind === 'changed' ? 0 : kind === 'callee' ? 1 : clamp(int(raw.depth, 1), 1, 2)
   const change = kind === 'changed' ? oneOf(CHANGES, raw.change) : undefined
   const reason = text(raw.reason).replace(/\s+/g, ' ').slice(0, 200)
+  const live = isRecord(raw.sentry) ? raw.sentry : undefined
+  const count = live === undefined ? 0 : Math.max(0, int(live.count, 0))
+  const issue = live === undefined ? '' : text(live.issue).slice(0, 40)
+  const title = live === undefined ? '' : text(live.title).replace(/\s+/g, ' ').slice(0, 120)
   return {
+    ...(count > 0
+      ? { sentry: { count, ...(issue === '' ? {} : { issue }), ...(title === '' ? {} : { title }) } }
+      : {}),
     id: text(raw.id) || `${file}:${name}`,
     name,
     file,

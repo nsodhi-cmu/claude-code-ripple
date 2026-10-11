@@ -17,6 +17,8 @@ export type RippleNode = {
   tested: boolean
   /** One line; present when the node needs review. */
   reason?: string
+  /** Unresolved production issues Sentry has in this function, when Sentry MCP was asked. */
+  sentry?: { count: number; issue?: string; title?: string }
 }
 
 /** `from` calls `to`. */

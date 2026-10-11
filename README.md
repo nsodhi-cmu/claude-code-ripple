@@ -73,6 +73,22 @@ The tool's answer lists the callers that need review and tells Claude to open, c
 
 Mapping costs one model turn, so it runs when you ask for it and never by itself.
 
+## Sentry MCP: which callers are already failing in production
+
+Ripple ships Sentry's MCP server (`ripple/.mcp.json`), so installing the mod connects it. Sign in once with `/mcp`.
+
+When Sentry is connected, the mapping run adds one step: Claude searches Sentry for unresolved issues whose stack traces touch the changed function or its callers. Each function Sentry knows about comes back on the map with its issue count and top issue ID:
+
+```
+├─ ● renderCart  src/cart.ts:14  NEEDS REVIEW · untested · Sentry: 2 issues · SHOP-1A · passes 1 argument
+```
+
+- A caller with live issues is flagged needs-review even if the type checker is happy, and it is listed to Claude as "already failing in production", so it gets checked first.
+- In the ring view it carries a purple halo; the tooltip has the issue's title.
+- With no Sentry connection the step is skipped and the map is the same as before.
+
+`/ripple demo` shows this with canned Sentry data (`SHOP-1A`, `SHOP-2F`), so it can be seen without a Sentry account.
+
 ## Try it
 
 The repository has two tiny projects with the same shape: one price formatter, four callers, two pages on top, and one caller with no test.

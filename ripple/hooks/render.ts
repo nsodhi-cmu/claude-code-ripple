@@ -1,5 +1,5 @@
 import type { RippleMap, RippleNode } from '../types'
-import { headerText } from './model'
+import { headerText, sentryNote } from './model'
 
 // Pure drawing math: the terminal's tree view as rows of styled text, and the
 // desktop's ring view as an SVG string. Nothing here touches `$`
@@ -102,6 +102,8 @@ function noteOf(node: RippleNode): string {
   if (node.status === 'needs-review') parts.push('NEEDS REVIEW')
   if (node.status === 'updated') parts.push('updated')
   if (!node.tested && node.kind !== 'callee') parts.push('untested')
+  const live = sentryNote(node)
+  if (live !== '') parts.push(live)
   return parts.join(' · ')
 }
 
@@ -621,12 +623,18 @@ export function ringSvg(map: RippleMap, options: SvgOptions = {}): string {
     out.push(`<g class="n"${data}>`)
     // The web page draws its own tooltip from the data attributes.
     if (options.isBare !== true && options.hasData !== true) {
-      const tip = [`${node.name} · ${locOf(node)}`, statusWords(node), node.reason ?? '']
+      const tip = [`${node.name} · ${locOf(node)}`, statusWords(node), node.reason ?? '', node.sentry?.title ?? '']
         .filter(part => part !== '')
         .join('\n')
       out.push(`<title>${esc(tip)}</title>`)
     }
     out.push(`<circle cx="${spot.x}" cy="${spot.y}" r="${dot}" fill="${fillOf(node)}" ${outline}/>`)
+    // A purple halo: Sentry has unresolved production issues in this function.
+    if (node.sentry !== undefined) {
+      out.push(
+        `<circle cx="${spot.x}" cy="${spot.y}" r="${dot + 5}" fill="none" stroke="#a855f7" stroke-width="2.2"/>`,
+      )
+    }
     out.push(
       `<text x="${label.x}" y="${label.nameY}" text-anchor="${label.anchor}" font-size="${isCallee ? 9 : 11}" fill="${isCallee ? INK.sub : INK.label}" ${halo}>${esc(name)}</text>`,
     )
