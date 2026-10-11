@@ -60,6 +60,21 @@ Ripple · 1 change → 6 callers · 3 need review · via LSP
 
 In the desktop app's Code tab the same map is drawn as rings: the changed function at the center, what it calls on a dashed inner ring, its callers on the next ring and their callers on the outer one. Edges into a caller that needs review are red, and untested functions have a dashed outline.
 
+## What the marks mean
+
+Ripple runs no tests and does no analysis of its own. Claude traces the callers and judges each one; Ripple draws that. The one mark Ripple sets itself is **updated**.
+
+| Mark | What it means | Who decides |
+| :- | :- | :- |
+| **changed** | A function your uncommitted changes touch. | Claude, from the diff |
+| **needs review** | A caller the change may break or alter, for example one that passes the old number of arguments. It comes with a one-line reason. | Claude |
+| **updated** | A flagged caller that has itself been changed since the map was made. It does not prove the fix is right. | Ripple, from the diff |
+| **ok** | A caller the change does not affect. | Claude |
+| **callee** | A function the changed one calls. Shown for context; it is not checked. | Claude |
+| **untested** | No test file mentions this function by name. Nothing is run: it says a test may be missing, not that one fails. | Claude, by searching the tests |
+
+How far to trust a map is in its header: `via LSP` and `via type checker` come from the language's own tools, `via text search` from a search Claude filtered by hand.
+
 ## How mapping works
 
 Ripple reads the working tree's uncommitted changes with `git diff HEAD`, plus the files git does not track yet. It does not watch Claude's tools. `/ripple` sends Claude one prompt that lists those changes and asks for every function they touched, their callers to depth 2 and their callees to depth 1, found with the most precise tool the repository offers:
