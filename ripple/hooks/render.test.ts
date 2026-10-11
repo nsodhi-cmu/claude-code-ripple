@@ -3,6 +3,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { RippleMap, RippleNode } from '../types'
 import { DEMO_MAP } from './demo'
 import {
+  KEY,
   RING,
   SVG_LIMIT,
   WIDE_COLUMNS,
@@ -300,12 +301,39 @@ describe('ring svg', () => {
 describe('web page', () => {
   const html = graphHtml(DEMO_MAP)
 
-  test('holds the ring view, a legend and what the hover script reads', () => {
+  test('holds the ring view and what the hover script reads', () => {
     expect(html.startsWith('<!doctype html>')).toBe(true)
     expect(html).toContain('<h1>Ripple · 1 change → 6 callers · 3 need review · via LSP · demo</h1>')
     expect(html).toContain('data-name="renderCart" data-loc="src/cart.ts:14" data-status="needs review · untested"')
-    expect(html).toContain('>needs review</text>')
     expect(count(html, '<script>')).toBe(1)
     expect(html).toContain("node.addEventListener('mousemove'")
+  })
+
+  test('says under the picture what every mark means and where it comes from', () => {
+    expect(KEY.map(entry => entry.label)).toEqual([
+      'changed',
+      'needs review',
+      'updated',
+      'ok',
+      'callee',
+      'untested',
+      'sentry',
+    ])
+    for (const entry of KEY) {
+      expect(html).toContain(`<b>${entry.label}</b>`)
+      expect(entry.means.length).toBeGreaterThan(30)
+    }
+    expect(html).toContain('Claude found no test file that mentions this function by name. Nothing is run')
+    expect(html).toContain('Ripple sets this from the diff; it does not prove the fix is right.')
+    expect(html).toContain('Ripple runs no tests and no analysis of its own.')
+  })
+
+  test('is a still page: nothing pulses or moves', () => {
+    for (const text of [html, ringSvg(DEMO_MAP)]) {
+      expect(text).not.toContain('<animate')
+      expect(text).not.toContain('animation')
+      expect(text).not.toContain('@keyframes')
+      expect(text).not.toContain('transition')
+    }
   })
 })

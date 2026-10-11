@@ -524,21 +524,54 @@ function shortLoc(node: RippleNode, max: number): string {
 export const SVG_LIMIT = 131072
 
 export type SvgOptions = {
-  /** Draws the legend inside the picture (the web page has no other). */
-  hasLegend?: boolean
   /** Adds `data-*` attributes the web page's hover script reads. */
   hasData?: boolean
   /** Leaves out sublabels and tooltips: the fallback for a picture too large. */
   isBare?: boolean
 }
 
-const LEGEND: Array<{ label: string; fill: string; isDashed?: true }> = [
-  { label: 'changed', fill: INK.changed },
-  { label: 'needs review', fill: INK.review },
-  { label: 'updated', fill: INK.updated },
-  { label: 'ok', fill: INK.ok },
-  { label: 'callee', fill: INK.callee },
-  { label: 'untested', fill: INK.ground, isDashed: true },
+/**
+ * What each mark on the map means and where it comes from, in words a reader
+ * can check: the web page prints this under the picture. Every label but
+ * `updated` is Claude's reading of the code; Ripple runs no tests.
+ */
+export const KEY: ReadonlyArray<{ label: string; fill: string; isDashed?: true; means: string }> = [
+  {
+    label: 'changed',
+    fill: INK.changed,
+    means: 'A function your uncommitted changes touch. Claude names these from the diff; they sit at the center.',
+  },
+  {
+    label: 'needs review',
+    fill: INK.review,
+    means:
+      'A caller Claude judged the change may break or alter: for example it passes the old number of arguments. Hover it for the reason.',
+  },
+  {
+    label: 'updated',
+    fill: INK.updated,
+    means:
+      'A flagged caller that has itself been changed since this map was made. Ripple sets this from the diff; it does not prove the fix is right.',
+  },
+  { label: 'ok', fill: INK.ok, means: 'A caller Claude judged the change does not affect.' },
+  {
+    label: 'callee',
+    fill: INK.callee,
+    means: 'A function the changed one calls. Shown for context on the dashed inner ring; it is not checked.',
+  },
+  {
+    label: 'untested',
+    fill: INK.ground,
+    isDashed: true,
+    means:
+      'Claude found no test file that mentions this function by name. Nothing is run: it says a test may be missing, not that one fails.',
+  },
+  {
+    label: 'sentry',
+    fill: '#a855f7',
+    means:
+      'A purple halo: Sentry has unresolved production issues in this function, found through Sentry MCP when it is connected. In /ripple demo this is sample data.',
+  },
 ]
 
 /**
@@ -574,14 +607,6 @@ export function ringSvg(map: RippleMap, options: SvgOptions = {}): string {
     `<circle cx="${center}" cy="${center}" r="${RING.callees}" stroke-opacity="0.26" stroke-dasharray="3 5"/>`,
     '</g>',
   )
-  if (spots.length > 0) {
-    out.push(
-      `<circle cx="${center}" cy="${center}" r="12" fill="none" stroke="${INK.changed}">`,
-      `<animate attributeName="r" from="12" to="${RING.far + 45}" dur="3.6s" repeatCount="indefinite"/>`,
-      '<animate attributeName="stroke-opacity" from="0.5" to="0" dur="3.6s" repeatCount="indefinite"/>',
-      '</circle>',
-    )
-  }
 
   out.push('<g stroke-linecap="round">')
   for (const edge of map.edges) {
@@ -646,31 +671,22 @@ export function ringSvg(map: RippleMap, options: SvgOptions = {}): string {
     out.push('</g>')
   }
 
-  if (options.hasLegend === true) {
-    let x = 18
-    out.push(`<g font-size="9.5" fill="${INK.sub}">`)
-    for (const entry of LEGEND) {
-      const outline = entry.isDashed
-        ? `stroke="${INK.label}" stroke-width="1.4" stroke-dasharray="3 2.4"`
-        : `stroke="${INK.label}" stroke-opacity="0.5" stroke-width="1"`
-      out.push(
-        `<circle cx="${x}" cy="${size - 18}" r="5" fill="${entry.fill}" ${outline}/>`,
-        `<text x="${x + 9}" y="${size - 14.5}">${esc(entry.label)}</text>`,
-      )
-      x += 22 + entry.label.length * 5.9
-    }
-    out.push('</g>')
-  }
-
   out.push('</svg>')
   const svg = out.join('')
   // A full map is a fifth of the limit; this only guards a pathological one.
   return svg.length > SVG_LIMIT && options.isBare !== true ? ringSvg(map, { ...options, isBare: true }) : svg
 }
 
-/** `.ripple/graph.html`: the ring view, and `file:line` beside the pointer. */
+/**
+ * `.ripple/graph.html`: the ring view, `file:line` beside the pointer, and
+ * under the picture what every mark means. A still page: nothing moves.
+ */
 export function graphHtml(map: RippleMap): string {
   const header = esc(headerText(map))
+  const key = KEY.map(
+    entry =>
+      `<li><span class="dot${entry.isDashed ? ' dashed' : ''}" style="background:${entry.fill}"></span><b>${esc(entry.label)}</b><span>${esc(entry.means)}</span></li>`,
+  )
   return [
     '<!doctype html>',
     '<html lang="en">',
@@ -686,12 +702,22 @@ export function graphHtml(map: RippleMap): string {
     '#tip{position:fixed;pointer-events:none;background:#1e293b;border:1px solid #334155;border-radius:6px;padding:6px 9px;max-width:46ch;white-space:pre-wrap}',
     '#tip b{color:#fbbf24;font-weight:600}',
     '#tip i{color:#94a3b8;font-style:normal}',
+    '.key{list-style:none;margin:0;padding:0;max-width:min(92vw,84vh);display:grid;gap:7px}',
+    '.key li{display:grid;grid-template-columns:14px 13ch 1fr;gap:8px;align-items:start;line-height:1.45}',
+    '.key .dot{width:10px;height:10px;border-radius:50%;margin-top:4px;border:1px solid rgba(226,232,240,.6);box-sizing:border-box}',
+    '.key .dashed{border:1.5px dashed #e2e8f0}',
+    '.key span:last-child,.note{color:#94a3b8}',
+    '.note{max-width:min(92vw,84vh);margin:0;line-height:1.45}',
     '</style>',
     '</head>',
     '<body>',
     '<main>',
     `<h1>${header}</h1>`,
-    ringSvg(map, { hasLegend: true, hasData: true }),
+    ringSvg(map, { hasData: true }),
+    '<ul class="key">',
+    ...key,
+    '</ul>',
+    '<p class="note">Ripple runs no tests and no analysis of its own. Claude traced the callers with the tool named in the title (a language server, the type checker, or text search) and judged each one; Ripple draws that, and marks a caller updated when the diff shows it changed afterwards.</p>',
     '</main>',
     '<div id="tip" hidden></div>',
     '<script>',
