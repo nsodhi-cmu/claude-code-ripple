@@ -4,13 +4,12 @@ import type { RippleEdit, RippleEdge, RippleMap, RippleNode } from '../types'
 // unit-tested directly (model.test.ts).
 
 export const MAX_NODES = 40
-export const MAX_EDITS = 60
 export const SNIPPET_CHARS = 400
-/** An edit this close to a node's line counts as touching the node. */
+/** A change this close to a node's line counts as touching the node. */
 export const TOUCH_LINES = 15
 export const REPORT_TOOL = 'mcp__ripple__report'
 /** Opens every mapping prompt; `turn.start` knows the mapping turn by it. */
-export const MAPPING_MARKER = '[Ripple] Map what the edits below reach.'
+export const MAPPING_MARKER = '[Ripple] Map what the changes below reach.'
 
 const METHODS = ['lsp', 'tooling', 'grep'] as const
 const KINDS = ['changed', 'caller', 'callee'] as const
@@ -24,7 +23,7 @@ const METHOD_LABEL: Record<RippleMap['method'], string> = {
 }
 
 export const REPORT_DESCRIPTION =
-  'Ripple: submit the impact map of recent edits. Call exactly once, only when Ripple asks you to map.'
+  'Ripple: submit the impact map of the uncommitted changes. Call exactly once, only when Ripple asks you to map.'
 
 /** The report tool's input schema: RippleMap, as JSON Schema. */
 export const REPORT_SCHEMA: Record<string, unknown> = {
@@ -131,16 +130,6 @@ export function slash(path: string): string {
   return path.replace(/\\/g, '/')
 }
 
-/** `path` relative to `root` when it lies under it, else `path`; forward slashes. */
-export function relativeTo(root: string, path: string): string {
-  const full = slash(path)
-  const base = slash(root).replace(/\/+$/, '')
-  if (base !== '' && full.toLowerCase().startsWith(`${base.toLowerCase()}/`)) {
-    return full.slice(base.length + 1)
-  }
-  return full
-}
-
 function comparable(path: string): string {
   return slash(path)
     .replace(/^\.\//, '')
@@ -159,70 +148,23 @@ export function sameFile(a: string, b: string): boolean {
   return left === right || left.endsWith(`/${right}`) || right.endsWith(`/${left}`)
 }
 
-// ---------------------------------------------------------------------- patches
-
-/** One hunk of an Edit or Write result's `structuredPatch`. */
-export type Hunk = { newStart: number; lines: string[] }
-
-/** The hunks of a tool result, or none when the result carries no patch. */
-export function readPatch(result: unknown): Hunk[] {
-  if (!isRecord(result) || !Array.isArray(result.structuredPatch)) return []
-  const hunks: Hunk[] = []
-  for (const raw of result.structuredPatch as unknown[]) {
-    if (!isRecord(raw) || typeof raw.newStart !== 'number' || !Array.isArray(raw.lines)) continue
-    hunks.push({
-      newStart: raw.newStart,
-      lines: (raw.lines as unknown[]).filter((line): line is string => typeof line === 'string'),
-    })
-  }
-  return hunks
-}
+// ---------------------------------------------------------------------- touches
 
 type Span = readonly [start: number, end: number]
 
-/** The first and last changed line of a hunk, in the new file's numbering. */
-function changedSpan(hunk: Hunk): Span | undefined {
-  let cursor = hunk.newStart
-  let first: number | undefined
-  let last = cursor
-  for (const line of hunk.lines) {
-    const mark = line.charAt(0)
-    if (mark === '\\') continue
-    if (mark === '+' || mark === '-') {
-      first ??= cursor
-      last = cursor
-    }
-    if (mark !== '-') cursor += 1
-  }
-  return first === undefined ? undefined : [first, last]
-}
-
-export function firstChangedLine(hunks: Hunk[]): number | undefined {
-  for (const hunk of hunks) {
-    const span = changedSpan(hunk)
-    if (span !== undefined) return span[0]
-  }
-  return undefined
-}
-
-/** What one edit changed, as the "did it touch this node" test reads it. */
+/** What one hunk of the diff changed, as the "did it touch this node" test reads it. */
 export type EditTouch = { file: string; text: string; spans: Span[] }
 
-/**
- * Builds the touch of an edit. With a patch, the text is the added lines and
- * the spans say where; without one, the text is the tool's new text alone.
- */
-export function touchOf(file: string, newText: string, hunks: Hunk[]): EditTouch {
-  const spans: Span[] = []
-  const added: string[] = []
-  for (const hunk of hunks) {
-    const span = changedSpan(hunk)
-    if (span !== undefined) spans.push(span)
-    for (const line of hunk.lines) {
-      if (line.startsWith('+')) added.push(line.slice(1))
-    }
-  }
-  return { file, text: added.length > 0 ? added.join('\n') : newText, spans }
+/** The touch of one diff hunk: its added text, and the lines it now covers. */
+export function touchOf(hunk: RippleEdit): EditTouch {
+  const start = hunk.line ?? 1
+  const height = hunk.snippet === '' ? 1 : hunk.snippet.split('\n').length
+  return { file: hunk.file, text: hunk.snippet, spans: [[start, start + height - 1]] }
+}
+
+/** Names a hunk by its file and text, not its line: a hunk pushed down the file is the same hunk. */
+export function hunkKey(hunk: RippleEdit): string {
+  return printOf(`${comparable(hunk.file)}\n${hunk.snippet}`)
 }
 
 function isWordChar(char: string | undefined): boolean {
@@ -308,23 +250,109 @@ export function headerText(map: RippleMap): string {
   return parts.join(' · ')
 }
 
-/** The status line under the prompt, or undefined when there is nothing to say. */
-export function statusText(
-  edits: RippleEdit[],
-  map: RippleMap | null,
-  mapping: boolean,
-): string | undefined {
+/**
+ * The status line under the prompt, or undefined when there is nothing to say.
+ * `unmapped` is how many files hold uncommitted changes the map on hand was
+ * not made from: what /ripple would map now.
+ */
+export function statusText(map: RippleMap | null, mapping: boolean, unmapped: number): string | undefined {
   if (mapping) return 'ripple: mapping…'
   const parts: string[] = []
   const review = map === null || map.isDemo === true ? 0 : countsOf(map).review
   if (review > 0) parts.push(`${review} need${review === 1 ? 's' : ''} review`)
-  if (edits.length > 0) {
-    const files = new Set(edits.map(edit => comparable(edit.file))).size
-    parts.push(`${plural(edits.length, 'edit')} · ${plural(files, 'file')} · /ripple to map`)
-  } else if (review > 0) {
-    parts.push('/ripple show')
-  }
+  if (unmapped > 0) parts.push(`uncommitted changes in ${plural(unmapped, 'file')} · /ripple to map`)
+  else if (review > 0) parts.push('/ripple to see the map')
   return parts.length === 0 ? undefined : `ripple: ${parts.join(' · ')}`
+}
+
+// ------------------------------------------------------------------ git diffs
+
+/** The most hunks of a diff that are kept; a larger diff is listed by file anyway. */
+const MAX_HUNKS = 600
+
+/**
+ * Reads `git diff --unified=0` into one edit per hunk: the file, the first new
+ * line, and the added text. This is how a change nobody made through Claude's
+ * Edit tool (yours, a script's, a merge's) reaches the map.
+ */
+export function parseDiff(diff: string, at: number): RippleEdit[] {
+  const edits: RippleEdit[] = []
+  let file = ''
+  let before = ''
+  let isHeader = false
+  let hunk: { line: number; added: string[] } | undefined
+  const flush = (): void => {
+    if (hunk !== undefined && file !== '' && edits.length < MAX_HUNKS) {
+      edits.push({ file, line: hunk.line, snippet: hunk.added.join('\n').slice(0, SNIPPET_CHARS), at })
+    }
+    hunk = undefined
+  }
+  const pathOf = (value: string): string =>
+    value.trim().replace(/^"|"$/g, '').replace(/^[ab]\//, '')
+
+  for (const raw of diff.split('\n')) {
+    const line = raw.endsWith('\r') ? raw.slice(0, -1) : raw
+    if (line.startsWith('diff --git ')) {
+      flush()
+      file = ''
+      before = ''
+      isHeader = true
+    } else if (isHeader && line.startsWith('--- ')) {
+      before = pathOf(line.slice(4))
+    } else if (isHeader && line.startsWith('+++ ')) {
+      const after = pathOf(line.slice(4))
+      file = after === '/dev/null' || after === 'dev/null' ? before : after
+    } else if (line.startsWith('@@ ')) {
+      flush()
+      isHeader = false
+      const start = /^@@ -\d+(?:,\d+)? \+(\d+)/.exec(line)
+      hunk = { line: Math.max(1, Number(start?.[1] ?? 1)), added: [] }
+    } else if (hunk !== undefined && line.startsWith('+')) {
+      hunk.added.push(line.slice(1))
+    }
+  }
+  flush()
+  return edits
+}
+
+/** A short print of a diff's text: two diffs with one print are taken as the same change. */
+export function printOf(diff: string): string {
+  let hash = 5381
+  for (let index = 0; index < diff.length; index += 1) {
+    hash = ((hash << 5) + hash + diff.charCodeAt(index)) | 0
+  }
+  return `${diff.length}:${(hash >>> 0).toString(16)}`
+}
+
+export function fileCount(edits: RippleEdit[]): number {
+  return new Set(edits.map(edit => comparable(edit.file))).size
+}
+
+/** The most new files listed; past this a prompt names files, not functions. */
+const MAX_NEW_FILES = 40
+
+/**
+ * `git ls-files --others --exclude-standard` as hunks: a file git does not
+ * track yet is a change too, though `git diff` never shows it.
+ */
+export function newFileHunks(listing: string, at: number): RippleEdit[] {
+  return listing
+    .split('\n')
+    .map(line => slash(line.trim().replace(/^"|"$/g, '')))
+    .filter(file => file !== '' && !file.startsWith('.ripple/'))
+    .slice(0, MAX_NEW_FILES)
+    .map(file => ({ file, line: 1, snippet: '(new file, not yet tracked by git)', at }))
+}
+
+/**
+ * The map the store kept, read back with the print of the diff it was made
+ * from; null when there is none or it no longer reads as a map.
+ */
+export function readStored(value: unknown): RippleMap | null {
+  const kept = sanitizeMap(value)
+  if ('error' in kept || kept.map.nodes.length === 0) return null
+  const print = isRecord(value) && typeof value.print === 'string' ? value.print : undefined
+  return print === undefined ? kept.map : { ...kept.map, print }
 }
 
 // -------------------------------------------------------------------- prompts
@@ -343,31 +371,39 @@ function editLine(edit: RippleEdit): string {
   return shown === '' ? `- ${where}` : `- ${where}: \`${shown}\``
 }
 
+const LISTED_FILES = 60
+
+/** Many edits, one line a file: how many changes, and where the first one is. */
+function fileLines(edits: RippleEdit[]): string[] {
+  const byFile = new Map<string, RippleEdit[]>()
+  for (const edit of edits) byFile.set(edit.file, [...(byFile.get(edit.file) ?? []), edit])
+  const lines: string[] = []
+  for (const [file, group] of [...byFile].slice(0, LISTED_FILES)) {
+    const [first] = group
+    const shown = first === undefined ? '' : firstLine(first.snippet)
+    const where = first?.line === undefined ? '' : `, first at line ${first.line}`
+    lines.push(`- ${file} (${plural(group.length, 'change')}${where})${shown === '' ? '' : `: \`${shown}\``}`)
+  }
+  if (byFile.size > LISTED_FILES) lines.push(`- and ${plural(byFile.size - LISTED_FILES, 'more file')}`)
+  return lines
+}
+
 /**
- * The prompt that asks Claude to map. `previous` are the changed functions of
- * the map on screen, listed when the person re-maps so they are traced again.
+ * The prompt that asks Claude to map the working tree's uncommitted changes:
+ * `hunks` is `git diff HEAD` as parseDiff read it, however the changes were made.
  */
-export function mappingPrompt(edits: RippleEdit[], previous: RippleNode[] = []): string {
+export function mappingPrompt(hunks: RippleEdit[]): string {
   const lines = [
     `${MAPPING_MARKER} Ripple will draw your result for the user.`,
     'Do not edit any files while mapping, and do not ask the user anything: make your best call.',
     '',
-    'Edits since the last map:',
+    'Uncommitted changes in the working tree (from `git diff HEAD`; run it yourself to read the full text):',
   ]
-  const listed = edits.slice(-LISTED_EDITS)
-  if (listed.length === 0) lines.push('- (none)')
-  for (const edit of listed) lines.push(editLine(edit))
-  if (edits.length > listed.length) {
-    const earlier = [...new Set(edits.slice(0, -LISTED_EDITS).map(edit => edit.file))]
-    lines.push(`- and ${plural(edits.length - listed.length, 'earlier edit')} in: ${earlier.join(', ')}`)
-  }
-  if (previous.length > 0) {
-    lines.push('', 'Functions the last map had as changed; trace these again too:')
-    for (const node of previous) lines.push(`- ${node.name} (${node.file}:${node.line})`)
-  }
+  if (hunks.length > LISTED_EDITS) lines.push(...fileLines(hunks))
+  else for (const hunk of hunks) lines.push(editLine(hunk))
   lines.push(
     '',
-    '1. Identify every function or method these edits changed. For each, decide whether its',
+    '1. Identify every function or method these changes touched. For each, decide whether its',
     '   signature changed (parameters or return type), only its behavior changed, or it was',
     '   added or removed.',
     '',
@@ -402,7 +438,7 @@ export function mappingPrompt(edits: RippleEdit[], previous: RippleNode[] = []):
     '   - kind is "changed" (depth 0), "caller" (depth 1 or 2) or "callee" (depth 1). Set',
     '     change on changed nodes only.',
     '   - One edge per call: from is the id of the caller, to the id of what it calls.',
-    '   - If the edits changed no function at all, report empty nodes and edges.',
+    '   - If the changes touched no function at all, report empty nodes and edges.',
   )
   return lines.join('\n')
 }
@@ -410,7 +446,7 @@ export function mappingPrompt(edits: RippleEdit[], previous: RippleNode[] = []):
 /** The report tool's result: what makes Claude go and check the callers. */
 export function reportText(map: RippleMap, notes: string[] = []): string {
   if (map.nodes.length === 0) {
-    return 'Ripple has nothing to draw: the edits changed no function. Tell the user so in one line.'
+    return 'Ripple has nothing to draw: the changes touched no function. Tell the user so in one line.'
   }
   const counts = countsOf(map)
   const lines = [
@@ -426,7 +462,7 @@ export function reportText(map: RippleMap, notes: string[] = []): string {
     }
     lines.push(
       "For each one: open it, check it against the change, and fix it if it's broken.",
-      'Ripple marks callers green as you edit them. Then tell the user what you changed.',
+      'Ripple turns a caller green once your fix to it is in the working tree. Then tell the user what you changed.',
     )
   } else {
     lines.push('Nothing needs review. Tell the user what you mapped and that no caller looks broken.')

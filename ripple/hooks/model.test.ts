@@ -7,12 +7,15 @@ import {
   MAX_NODES,
   checkPrompt,
   countsOf,
-  firstChangedLine,
+  fileCount,
   headerText,
+  hunkKey,
   mappingPrompt,
   markUpdated,
-  readPatch,
-  relativeTo,
+  newFileHunks,
+  parseDiff,
+  printOf,
+  readStored,
   reportText,
   sameFile,
   sanitizeMap,
@@ -27,22 +30,15 @@ const node = (id: string) => {
   return found
 }
 
+/** renderCart, flagged, calling formatPrice at src/cart.ts:14. */
 const cart = node('src/cart.ts:renderCart')
 
-/** An Edit result's patch: two context lines, one line replaced, at `start`. */
-const patchAt = (start: number, added: string) => ({
-  structuredPatch: [
-    { oldStart: start, oldLines: 4, newStart: start, newLines: 4, lines: [' a', ' b', '-old', `+${added}`, ' c'] },
-  ],
-})
+/** One hunk of a diff: `snippet` added at `line` of `file`. */
+const hunk = (file: string, line: number, snippet: string): RippleEdit => ({ file, line, snippet, at: 1 })
+
+const REPORT = { method: DEMO_MAP.method, nodes: DEMO_MAP.nodes, edges: DEMO_MAP.edges }
 
 describe('paths', () => {
-  test('a Windows absolute path becomes relative to the project root', () => {
-    expect(relativeTo('C:\\repo\\shop', 'C:\\repo\\shop\\src\\price.ts')).toBe('src/price.ts')
-    expect(relativeTo('C:/repo/shop/', 'c:/Repo/Shop/src/price.ts')).toBe('src/price.ts')
-    expect(relativeTo('/repo/shop', '/elsewhere/price.ts')).toBe('/elsewhere/price.ts')
-  })
-
   test('two spellings of one file match on a path boundary', () => {
     expect(sameFile('src/cart.ts', 'C:\\repo\\src\\cart.ts')).toBe(true)
     expect(sameFile('./src/cart.ts', 'src/Cart.ts')).toBe(true)
@@ -52,44 +48,81 @@ describe('paths', () => {
   })
 })
 
-describe('patches', () => {
-  test('the first changed line is read past the context lines', () => {
-    const hunks = readPatch(patchAt(10, 'new'))
-    expect(firstChangedLine(hunks)).toBe(12)
-    expect(touchOf('src/price.ts', 'ignored', hunks)).toEqual({
-      file: 'src/price.ts',
-      text: 'new',
-      spans: [[12, 12]],
-    })
+describe('reading a git diff', () => {
+  const diff = [
+    'diff --git a/src/price.ts b/src/price.ts',
+    'index 1111111..2222222 100644',
+    '--- a/src/price.ts',
+    '+++ b/src/price.ts',
+    '@@ -1 +1 @@',
+    '-export function formatPrice(amount: number): string {',
+    '+export function formatPrice(amount: number, currency: string): string {',
+    '@@ -9,0 +10,2 @@ export function currencySymbol(): string {',
+    '+++ not a header: an added line that starts with two pluses',
+    '+second',
+    'diff --git a/src/old.ts b/src/old.ts',
+    'deleted file mode 100644',
+    '--- a/src/old.ts',
+    '+++ /dev/null',
+    '@@ -1,2 +0,0 @@',
+    '-gone',
+    '-gone too',
+    '',
+  ].join('\r\n')
+
+  test('each hunk is one entry: the file, the first new line, the added text', () => {
+    expect(parseDiff(diff, 7)).toEqual([
+      { file: 'src/price.ts', line: 1, snippet: 'export function formatPrice(amount: number, currency: string): string {', at: 7 },
+      { file: 'src/price.ts', line: 10, snippet: '++ not a header: an added line that starts with two pluses\nsecond', at: 7 },
+      { file: 'src/old.ts', line: 1, snippet: '', at: 7 },
+    ])
+    expect(parseDiff('', 7)).toEqual([])
+    expect(fileCount(parseDiff(diff, 7))).toBe(2)
   })
 
-  test('a result with no patch touches by its new text alone', () => {
-    expect(readPatch({ ok: true })).toEqual([])
-    expect(readPatch(undefined)).toEqual([])
-    expect(firstChangedLine([])).toBe(undefined)
-    expect(touchOf('a.ts', 'renderCart()', [])).toEqual({ file: 'a.ts', text: 'renderCart()', spans: [] })
+  test('a file git does not track yet is a change too', () => {
+    expect(newFileHunks('src/new.ts\n"src/with space.ts"\n.ripple/graph.html\n\n', 3)).toEqual([
+      { file: 'src/new.ts', line: 1, snippet: '(new file, not yet tracked by git)', at: 3 },
+      { file: 'src/with space.ts', line: 1, snippet: '(new file, not yet tracked by git)', at: 3 },
+    ])
+    expect(newFileHunks('', 3)).toEqual([])
+  })
+
+  test('the same diff has the same print, a different one another', () => {
+    expect(printOf(diff)).toBe(printOf(diff))
+    expect(printOf(diff)).not.toBe(printOf(diff.replace('currency', 'coinage')))
+    expect(printOf('')).toBe('0:1505')
+  })
+
+  test('a hunk is named by its file and text, wherever it now sits', () => {
+    expect(hunkKey(hunk('src/a.ts', 3, 'x = 1'))).toBe(hunkKey(hunk('src/a.ts', 90, 'x = 1')))
+    expect(hunkKey(hunk('src/a.ts', 3, 'x = 1'))).not.toBe(hunkKey(hunk('src/a.ts', 3, 'x = 2')))
+    expect(hunkKey(hunk('src/a.ts', 3, 'x = 1'))).not.toBe(hunkKey(hunk('src/b.ts', 3, 'x = 1')))
   })
 })
 
 describe('turning callers green', () => {
-  test('an edit in the same file near the node touches it', () => {
-    const near = touchOf('C:/repo/src/cart.ts', '', readPatch(patchAt(20, 'x')))
-    const far = touchOf('C:/repo/src/cart.ts', '', readPatch(patchAt(80, 'x')))
-    expect(touches(cart, near)).toBe(true)
-    expect(touches(cart, far)).toBe(false)
+  test('a hunk covers the lines of its added text', () => {
+    expect(touchOf(hunk('a.ts', 10, 'one\ntwo\nthree'))).toEqual({ file: 'a.ts', text: 'one\ntwo\nthree', spans: [[10, 12]] })
+    expect(touchOf(hunk('a.ts', 10, ''))).toEqual({ file: 'a.ts', text: '', spans: [[10, 10]] })
   })
 
-  test('an edit that names the node touches it, as a whole word only', () => {
-    expect(touches(cart, touchOf('src/cart.ts', 'export function renderCart(cart) {', []))).toBe(true)
-    expect(touches(cart, touchOf('src/cart.ts', 'prerenderCartoon()', []))).toBe(false)
+  test('a hunk in the same file near the node touches it', () => {
+    expect(touches(cart, touchOf(hunk('src/cart.ts', 22, 'x')))).toBe(true)
+    expect(touches(cart, touchOf(hunk('src/cart.ts', 80, 'x')))).toBe(false)
   })
 
-  test('an edit in another file never does', () => {
-    expect(touches(cart, touchOf('src/other.ts', 'renderCart()', readPatch(patchAt(40, 'x'))))).toBe(false)
+  test('a hunk that names the node touches it, as a whole word only', () => {
+    expect(touches(cart, touchOf(hunk('src/cart.ts', 200, 'export function renderCart(cart) {')))).toBe(true)
+    expect(touches(cart, touchOf(hunk('src/cart.ts', 200, 'prerenderCartoon()')))).toBe(false)
+  })
+
+  test('a hunk in another file never does', () => {
+    expect(touches(cart, touchOf(hunk('src/other.ts', 14, 'renderCart()')))).toBe(false)
   })
 
   test('only needs-review nodes turn, and the rest of the map is kept', () => {
-    const touch = touchOf('src/cart.ts', '', readPatch(patchAt(12, 'formatPrice(total, cart.currency)')))
+    const touch = touchOf(hunk('src/cart.ts', 14, 'formatPrice(total, cart.currency)'))
     const { map, updated } = markUpdated(DEMO_MAP, touch)
     expect(updated.map(one => one.name)).toEqual(['renderCart'])
     expect(countsOf(map).review).toBe(2)
@@ -108,39 +141,43 @@ describe('what the person reads', () => {
     expect(headerText({ method: 'grep', nodes: [], edges: [] })).toBe('Ripple · no function changes found')
   })
 
-  test('the status line follows edits, mapping and reviews', () => {
-    const edit: RippleEdit = { file: 'src/price.ts', snippet: 'x', at: 1 }
+  test('the status line follows the uncommitted changes, mapping and reviews', () => {
     const live: RippleMap = { ...DEMO_MAP, isDemo: false }
-    expect(statusText([], null, false)).toBe(undefined)
-    expect(statusText([edit], null, false)).toBe('ripple: 1 edit · 1 file · /ripple to map')
-    expect(statusText([edit, edit, { ...edit, file: 'src/ui.ts' }], null, false)).toBe(
-      'ripple: 3 edits · 2 files · /ripple to map',
-    )
-    expect(statusText([edit], null, true)).toBe('ripple: mapping…')
-    expect(statusText([], live, false)).toBe('ripple: 3 need review · /ripple show')
-    expect(statusText([edit], live, false)).toBe('ripple: 3 need review · 1 edit · 1 file · /ripple to map')
-    expect(statusText([], DEMO_MAP, false)).toBe(undefined)
+    expect(statusText(null, false, 0)).toBe(undefined)
+    expect(statusText(null, false, 72)).toBe('ripple: uncommitted changes in 72 files · /ripple to map')
+    expect(statusText(null, false, 1)).toBe('ripple: uncommitted changes in 1 file · /ripple to map')
+    expect(statusText(null, true, 72)).toBe('ripple: mapping…')
+    expect(statusText(live, false, 0)).toBe('ripple: 3 need review · /ripple to see the map')
+    expect(statusText(live, false, 2)).toBe('ripple: 3 need review · uncommitted changes in 2 files · /ripple to map')
+    expect(statusText(DEMO_MAP, false, 0)).toBe(undefined)
   })
 })
 
 describe('what Claude reads', () => {
-  test('the mapping prompt lists each edit and ends on the report tool', () => {
+  test('the mapping prompt lists each hunk of the diff and ends on the report tool', () => {
     const prompt = mappingPrompt([
-      { file: 'src/price.ts', line: 12, snippet: '\n  export function formatPrice(a, b) {\n  return 1', at: 1 },
-      { file: 'README.md', snippet: '', at: 2 },
+      hunk('src/price.ts', 1, '\n  export function formatPrice(a, b) {\n  return 1'),
+      hunk('src/old.ts', 1, ''),
+      hunk('src/new.ts', 1, '(new file, not yet tracked by git)'),
     ])
     expect(prompt.startsWith(MAPPING_MARKER)).toBe(true)
-    expect(prompt).toContain('- src/price.ts:12: `export function formatPrice(a, b) {`')
-    expect(prompt).toContain('- README.md\n')
+    expect(prompt).toContain('Uncommitted changes in the working tree (from `git diff HEAD`')
+    expect(prompt).toContain('- src/price.ts:1: `export function formatPrice(a, b) {`')
+    expect(prompt).toContain('- src/old.ts:1\n')
+    expect(prompt).toContain('- src/new.ts:1: `(new file, not yet tracked by git)`')
     expect(prompt).toContain('prepareCallHierarchy')
     expect(prompt).toContain('Call mcp__ripple__report exactly once')
-    expect(prompt).not.toContain('trace these again')
   })
 
-  test('a re-map names the functions the last map had as changed', () => {
-    const prompt = mappingPrompt([], [node('src/price.ts:formatPrice')])
-    expect(prompt).toContain('- (none)')
-    expect(prompt).toContain('trace these again too:\n- formatPrice (src/price.ts:1)')
+  test('a large diff is listed one line a file', () => {
+    const many = Array.from({ length: 90 }, (_, index) =>
+      hunk(`src/games/g${index % 45}.rs`, 10 + index, `fn drawGame${index}()`),
+    )
+    const prompt = mappingPrompt(many)
+    expect(prompt).toContain('- src/games/g0.rs (2 changes, first at line 10): `fn drawGame0()`')
+    expect(prompt).not.toContain('g0.rs:10')
+    const crowd = Array.from({ length: 70 }, (_, index) => hunk(`f${index}.rs`, 1, 'x'))
+    expect(mappingPrompt(crowd)).toContain('- and 10 more files')
   })
 
   test('the report result lists what needs review and what to do', () => {
@@ -158,7 +195,7 @@ describe('what Claude reads', () => {
       nodes: DEMO_MAP.nodes.map(one => ({ ...one, status: 'ok' as const })),
     }
     expect(reportText(calm)).toContain('Nothing needs review.')
-    expect(reportText({ method: 'lsp', nodes: [], edges: [] })).toContain('changed no function')
+    expect(reportText({ method: 'lsp', nodes: [], edges: [] })).toContain('touched no function')
   })
 
   test('a Check button asks about one caller', () => {
@@ -170,7 +207,7 @@ describe('what Claude reads', () => {
 
 describe('reading a reported map', () => {
   test('a clean map comes through whole', () => {
-    const read = sanitizeMap({ method: 'lsp', nodes: DEMO_MAP.nodes, edges: DEMO_MAP.edges })
+    const read = sanitizeMap(REPORT)
     if ('error' in read) throw new Error(read.error)
     expect(read.notes).toEqual([])
     expect(read.map.nodes).toEqual(DEMO_MAP.nodes)
@@ -246,5 +283,12 @@ describe('reading a reported map', () => {
     expect('error' in sanitizeMap(undefined)).toBe(true)
     expect('error' in sanitizeMap({ method: 'lsp', nodes: 'callers' })).toBe(true)
     expect('error' in sanitizeMap({ nodes: [{ id: 'x' }] })).toBe(true)
+  })
+
+  test('a kept map comes back with the print of the diff it was made from', () => {
+    expect(readStored({ ...REPORT, print: '12:ab' })).toEqual({ ...REPORT, print: '12:ab' })
+    expect(readStored(REPORT)).toEqual(REPORT)
+    expect(readStored(undefined)).toBe(null)
+    expect(readStored({ method: 'lsp', nodes: [], edges: [] })).toBe(null)
   })
 })
