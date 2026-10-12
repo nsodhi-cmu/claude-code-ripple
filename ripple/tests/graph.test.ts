@@ -121,11 +121,19 @@ describe('the drawing', () => {
       { text: '● renderInvoice', paint: 'breaks', isBold: true, isInverse: true },
     ])
     expect(spansWith(drawing, '╔').every(span => span.paint === 'accent')).toBe(true)
-    // Its edge down to formatPrice and the one in from InvoicePage are lit; CheckoutPage's is not.
     const [checkout, invoice] = (drawing.rows[4] ?? []).filter(span => span.text === '▼')
     expect([checkout?.paint, invoice?.paint]).toEqual(['dim', 'accent'])
+    expect((drawing.rows[9] ?? []).find(span => span.text === '▼')?.paint).toBe('accent')
     expect(spansWith(drawing, '● renderCart')).toEqual([{ text: '● renderCart', paint: 'breaks' }])
     expect(spansWith(drawing, '○ priceLabel').map(span => span.paint)).toEqual(['plain'])
+  })
+
+  test('where a lit edge and an unlit one leave a box by the same exit, the exit is lit', () => {
+    for (const selected of ['toFixed2', 'currencySymbol']) {
+      const drawing = drawGraph(SHOP_MAP, id(selected), { columns: 90, rows: 40 })
+      const exit = (drawing.rows[12] ?? []).find(span => span.text.includes('┬'))
+      expect(exit?.paint).toBe('accent')
+    }
   })
 
   test('every box is a hit over exactly its own cells, and no two hits overlap', () => {
@@ -173,9 +181,7 @@ describe('a layer too wide for the room', () => {
       drawGraph(report, selected, { columns, rows: 40 })
         .hits.map(hit => hit.id)
         .filter(hit => hit !== 'core')
-    // Three fit beside the fold box, which answers for the first node it holds.
     expect(shown(wide(12), 'dependent5', 64)).toEqual(['dependent0', 'dependent5', 'dependent11', 'dependent1'])
-    // From the change every dependent is linked, so what breaks comes before the first in line.
     expect(shown(wide(12), 'core', 60)).toEqual(['dependent0', 'dependent11', 'dependent1'])
   })
 
@@ -196,15 +202,20 @@ describe('a layer too wide for the room', () => {
     expect(spansWith(allBreak, 'more')).toEqual([{ text: '+10 more', paint: 'breaks' }])
     const hit = allBreak.hits.find(one => one.id === 'dependent2')
     expect(picture(allBreak)[(hit?.y ?? 0) + 1]?.slice(hit?.x, (hit?.x ?? 0) + (hit?.width ?? 0))).toBe('╎ +10 more ╎')
-    // Selecting it brings it out of the fold.
     expect(spansWith(allBreak, 'dependent2')).toHaveLength(0)
     expect(spansWith(drawGraph(wide(12, 12), 'dependent2', { columns: 60, rows: 40 }), 'dependent2')).toHaveLength(1)
   })
 
   test('nothing is ever drawn past the room, and no two boxes share a cell, at any width the graph is drawn in', () => {
+    const maps: Array<[RippleReport, string]> = [
+      [SHOP_MAP, id('emailReceipt')],
+      [wide(1), 'core'],
+      [wide(25), 'dependent12'],
+      [wide(25, 25), 'core'],
+    ]
     for (const columns of [GRAPH_COLUMNS, 41, 47, 59, 72, 100, 160]) {
-      for (const report of [SHOP_MAP, wide(1), wide(25), wide(25, 25)]) {
-        const drawing = drawGraph(report, 'core', { columns, rows: 40 })
+      for (const [report, selected] of maps) {
+        const drawing = drawGraph(report, selected, { columns, rows: 40 })
         expect(Math.max(...picture(drawing).map(row => row.length))).toBeLessThanOrEqual(columns)
         for (const hit of drawing.hits) {
           expect(hit.x).toBeGreaterThanOrEqual(0)
@@ -216,6 +227,15 @@ describe('a layer too wide for the room', () => {
         expect(new Set(cells).size).toBe(cells.length)
       }
     }
+  })
+
+  test('a flagged node too wide to fit is not passed over for narrower ones that matter less', () => {
+    const report = wide(4, 0)
+    report.nodes.push(node('aNameThatGoesOnAndOnWellPastAnyBox', { risk: 'breaks' }))
+    report.edges.push({ from: 'aNameThatGoesOnAndOnWellPastAnyBox', to: 'core' })
+    const [, boxes] = picture(drawGraph(report, 'dependent0', { columns: 46, rows: 40 }))
+    expect(boxes).toContain('+4 more')
+    expect(boxes).not.toContain('dependent1')
   })
 
   test('a name too long for a box is cut, so the widest box still leaves room for the fold box', () => {
@@ -264,7 +284,7 @@ describe('a room too short for every layer', () => {
     ])
   })
 
-  test('even one row of room draws the selected layer whole', () => {
+  test('a room shorter than a box still draws the selected layer whole', () => {
     const cramped = picture(drawGraph(SHOP_MAP, id('formatPrice'), { columns: 90, rows: 1 }))
     expect(cramped.join('\n')).toContain('◆ formatPrice')
     expect(cramped).toHaveLength(5)

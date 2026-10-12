@@ -15,11 +15,14 @@ export type RippleNode = {
   depth: number
   /** Changed symbols only. */
   change?: 'signature' | 'behavior' | 'renamed' | 'added' | 'removed'
-  /** `breaks` no longer compiles or runs, `review` may now behave differently, `ok` is unaffected. */
+  /**
+   * `breaks` will not compile or run as written, `review` may now behave
+   * differently, `ok` is unaffected. A dependency is always `ok`.
+   */
   risk: 'ok' | 'review' | 'breaks'
   /** Referenced from any test file. */
   isTested: boolean
-  /** One line; present when the risk is not `ok`. */
+  /** One line: why the node is at risk, or what changed about a changed symbol. */
   reason?: string
 }
 

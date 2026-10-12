@@ -2,7 +2,7 @@ import type { RippleNode } from '../types'
 
 // What both views draw with: rows of painted text, and the rectangles of them
 // that select a node when clicked. Plain data, so a drawing crosses to the
-// pane's surface module whole. Nothing here touches `$`.
+// pane's surface module whole.
 
 /** How a run of text is painted; the pane gives each paint the surface's own color. */
 export type Paint = 'plain' | 'dim' | 'changed' | 'breaks' | 'review' | 'accent'
@@ -17,11 +17,13 @@ export const COLORS: Readonly<Record<Paint, string | undefined>> = {
   accent: 'claude',
 }
 
+/** A run of text in one paint. */
 export type Span = { text: string; paint: Paint; isBold?: true; isInverse?: true }
 
 /** A rectangle of the drawing, in cells, and the node a click inside it selects. */
 export type Hit = { id: string; x: number; y: number; width: number; height: number }
 
+/** A view's picture of the map: its rows, top to bottom, and where a click selects what. */
 export type Drawing = { rows: Span[][]; hits: Hit[] }
 
 /** The room a drawing may take, in cells. */
@@ -30,6 +32,7 @@ export type Room = { columns: number; rows: number }
 /** A step of the selection, as the arrow keys name it. */
 export type Move = 'left' | 'right' | 'up' | 'down'
 
+/** The sign a node is drawn with. */
 export type Mark = { glyph: string; paint: Paint }
 
 const MARKS = {
@@ -49,19 +52,30 @@ export const LEGEND: ReadonlyArray<Mark & { label: string }> = [
   { ...MARKS.dependency, label: 'uses' },
 ]
 
+/** A node's mark. A changed symbol that another change puts at risk keeps its glyph and takes the risk's paint. */
 export function markOf(node: RippleNode): Mark {
-  if (node.role === 'changed') return MARKS.changed
   if (node.role === 'dependency') return MARKS.dependency
-  return MARKS[node.risk]
+  if (node.role === 'dependent') return MARKS[node.risk]
+  return node.risk === 'ok' ? MARKS.changed : { glyph: MARKS.changed.glyph, paint: MARKS[node.risk].paint }
 }
 
 export function locOf(node: RippleNode): string {
   return node.line > 0 ? `${node.file}:${node.line}` : node.file
 }
 
-/** Cuts `value` to `max` characters, the last one an ellipsis when anything was cut. */
-export function clip(value: string, max: number): string {
-  return value.length > max ? `${value.slice(0, Math.max(1, max - 1))}…` : value
+/**
+ * What to know of a node beyond its name: how a changed symbol changed, the
+ * risk of a flagged one, and whether it lacks a test.
+ */
+export function wordsOf(node: RippleNode): string[] {
+  const words: string[] = []
+  if (node.role === 'changed') {
+    const isAspect = node.change === 'signature' || node.change === 'behavior'
+    words.push(isAspect ? `${node.change} changed` : (node.change ?? 'changed'))
+  }
+  if (node.risk !== 'ok') words.push(node.risk)
+  if (!node.isTested && node.role !== 'dependency') words.push('untested')
+  return words
 }
 
 /**

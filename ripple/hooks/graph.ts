@@ -1,18 +1,19 @@
 import type { RippleNode, RippleReport } from '../types'
-import { clip, markOf, note, windowOf } from './draw'
+import { markOf, note, windowOf } from './draw'
 import type { Drawing, Hit, Move, Paint, Room, Span } from './draw'
-import { rankOf } from './map'
+import { clip, rankOf } from './map'
 
 // The graph view: the map as boxes in layers along the flow of use, dependents
 // above the change and dependencies below it, with the edges between
-// neighboring layers drawn in box characters. Nothing here touches `$`.
+// neighboring layers drawn in box characters.
 
 /** The most characters of a name a box shows. */
 const NAME_CHARS = 20
-/** A box is its label, a space and a border on each side. */
+/** What a box adds to its label: a space and a border on each side. */
 const BOX_PADDING = 4
 /** The room between two boxes of a layer, where the layer has it to spare. */
 const BOX_GAP = 2
+/** A box is a border, its label, and a border. */
 const BOX_ROWS = 3
 /** Between two layers: a row the edges run along, and a row of arrowheads. */
 const EDGE_ROWS = 2
@@ -48,15 +49,13 @@ export function layersOf(report: RippleReport): RippleNode[][] {
     const pulls = new Map(layer.map(node => [node.id, pullOf(node)]))
     byRank.set(
       rank,
-      layer
-        .map((node, index) => ({ node, index }))
-        .sort((a, b) => (pulls.get(a.node.id) ?? 0) - (pulls.get(b.node.id) ?? 0) || a.index - b.index)
-        .map(entry => entry.node),
+      [...layer].sort((a, b) => (pulls.get(a.id) ?? 0) - (pulls.get(b.id) ?? 0)),
     )
   }
   return ranks.map(rank => byRank.get(rank) ?? [])
 }
 
+/** What a node's box says: its mark and its name. */
 function labelOf(node: RippleNode): string {
   return `${markOf(node).glyph} ${clip(node.name, NAME_CHARS)}`
 }
@@ -65,7 +64,7 @@ function widthOf(node: RippleNode): number {
   return labelOf(node).length + BOX_PADDING
 }
 
-/** The box that stands for the nodes a layer had no room for. */
+/** What the box that stands for the nodes a layer had no room for says. */
 function foldLabel(count: number): string {
   return `+${count} more`
 }
@@ -79,6 +78,7 @@ function riskiest(nodes: RippleNode[]): Paint {
  * The nodes of a layer that fit across `columns`, in their order, and the
  * rest. The selected node is kept first, then what it is linked to, then the
  * others; among each, what breaks before what needs review before the rest.
+ * Nothing is kept ahead of a node that outranks it.
  */
 function fit(
   layer: RippleNode[],
@@ -94,41 +94,12 @@ function fit(
   }
   const kept = new Set<string>()
   let used = foldLabel(layer.length).length + BOX_PADDING
-  for (const { node } of layer
-    .map((node, index) => ({ node, index }))
-    .sort((a, b) => weight(a.node) - weight(b.node) || a.index - b.index)) {
-    const needed = widthOf(node) + 1
-    if (kept.size > 0 && used + needed > columns) continue
+  for (const node of [...layer].sort((a, b) => weight(a) - weight(b))) {
+    used += widthOf(node) + 1
+    if (kept.size > 0 && used > columns) break
     kept.add(node.id)
-    used += needed
   }
   return { shown: layer.filter(node => kept.has(node.id)), folded: layer.filter(node => !kept.has(node.id)) }
-}
-
-type Cell = { char: string; paint: Paint; isBold?: true; isInverse?: true }
-
-/** Which ways an edge leaves a cell; a cell several edges share shows all of theirs. */
-const UP = 1
-const DOWN = 2
-const LEFT = 4
-const RIGHT = 8
-
-const LINES: Record<number, string> = {
-  [UP]: '│',
-  [DOWN]: '│',
-  [UP | DOWN]: '│',
-  [LEFT]: '─',
-  [RIGHT]: '─',
-  [LEFT | RIGHT]: '─',
-  [DOWN | RIGHT]: '┌',
-  [DOWN | LEFT]: '┐',
-  [UP | RIGHT]: '└',
-  [UP | LEFT]: '┘',
-  [UP | DOWN | RIGHT]: '├',
-  [UP | DOWN | LEFT]: '┤',
-  [DOWN | LEFT | RIGHT]: '┬',
-  [UP | LEFT | RIGHT]: '┴',
-  [UP | DOWN | LEFT | RIGHT]: '┼',
 }
 
 type Frame = { corners: string; across: string; down: string; exit: string }
@@ -152,30 +123,15 @@ type Box = {
   isSelected: boolean
 }
 
+/** One layer as it is drawn: its boxes, and the row its top border is on. */
+type Shelf = { y: number; boxes: Box[] }
+
 function borderOf(box: Box): Paint {
   if (box.isSelected) return 'accent'
   return box.paint === 'plain' ? 'dim' : box.paint
 }
 
-function spansOf(cells: Cell[]): Span[] {
-  let end = cells.length
-  while (end > 0 && cells[end - 1]?.char === ' ') end -= 1
-  const spans: Span[] = []
-  for (const cell of cells.slice(0, end)) {
-    const last = spans.at(-1)
-    if (last !== undefined && last.paint === cell.paint && last.isBold === cell.isBold && last.isInverse === cell.isInverse) {
-      last.text += cell.char
-    } else {
-      spans.push({
-        text: cell.char,
-        paint: cell.paint,
-        ...(cell.isBold ? { isBold: true as const } : {}),
-        ...(cell.isInverse ? { isInverse: true as const } : {}),
-      })
-    }
-  }
-  return spans
-}
+const centerOf = (box: Box): number => box.x + Math.floor(box.width / 2)
 
 function boxesOf(layer: RippleNode[], columns: number, selected: string | null, near: ReadonlySet<string>): Box[] {
   const { shown, folded } = fit(layer, columns, selected, near)
@@ -205,12 +161,12 @@ function boxesOf(layer: RippleNode[], columns: number, selected: string | null, 
   return boxes
 }
 
-const centerOf = (box: Box): number => box.x + Math.floor(box.width / 2)
-
 /**
  * Seats a layer's boxes across `columns`, each as near as it can be to the
  * middle of the boxes of `beside` it is linked to, so that edges run short
- * and straight; with no layer beside it, the layer is centered.
+ * and straight. The boxes are pushed apart where they would overlap, and the
+ * layer is then slid back toward where it wanted to be. With no layer beside
+ * it, the layer is centered.
  */
 function seat(boxes: Box[], columns: number, beside: Box[], isLinked: (box: Box, other: Box) => boolean): void {
   const across = boxes.reduce((sum, box) => sum + box.width, 0)
@@ -231,13 +187,158 @@ function seat(boxes: Box[], columns: number, beside: Box[], isLinked: (box: Box,
     box.x = Math.max(0, Math.min(box.x, limit - box.width))
     limit = box.x - gap
   }
-  // Pushing boxes apart leaves them off to one side of what they wanted: slide the layer back.
   const offsets = boxes.flatMap((box, index) => (wanted[index] === undefined ? [] : [(wanted[index] ?? 0) - box.x]))
   const [first, last] = [boxes[0], boxes.at(-1)]
   if (offsets.length === 0 || first === undefined || last === undefined) return
   const mean = Math.round(offsets.reduce((sum, offset) => sum + offset, 0) / offsets.length)
   const slide = Math.max(-first.x, Math.min(mean, columns - last.x - last.width))
   for (const box of boxes) box.x += slide
+}
+
+/** Seats every shelf: the one at `middle` first, then each shelf against the one nearer the middle. */
+function seatAll(shelves: Shelf[], middle: number, columns: number, uses: (upper: Box, lower: Box) => boolean): void {
+  shelves.forEach((_, step) => {
+    for (const index of step === 0 ? [middle] : [middle - step, middle + step]) {
+      const shelf = shelves[index]
+      if (shelf === undefined) continue
+      const beside = step === 0 ? [] : (shelves[index < middle ? index + 1 : index - 1]?.boxes ?? [])
+      seat(shelf.boxes, columns, beside, (box, other) => (index < middle ? uses(box, other) : uses(other, box)))
+    }
+  })
+}
+
+type Cell = { char: string; paint: Paint; isBold?: true; isInverse?: true }
+
+/** The cells a graph is painted on, and the one way they are written. */
+type Canvas = { cells: Cell[][]; put: (x: number, y: number, text: string, style: Omit<Cell, 'char'>) => void }
+
+function canvasOf(columns: number, rows: number): Canvas {
+  const cells: Cell[][] = Array.from({ length: rows }, () =>
+    Array.from({ length: columns }, () => ({ char: ' ', paint: 'plain' as Paint })),
+  )
+  const put: Canvas['put'] = (x, y, text, style) => {
+    ;[...text].forEach((char, index) => {
+      const row = cells[y]
+      if (row !== undefined && x + index >= 0 && x + index < columns) row[x + index] = { char, ...style }
+    })
+  }
+  return { cells, put }
+}
+
+function spansOf(cells: Cell[]): Span[] {
+  let end = cells.length
+  while (end > 0 && cells[end - 1]?.char === ' ') end -= 1
+  const spans: Span[] = []
+  for (const cell of cells.slice(0, end)) {
+    const last = spans.at(-1)
+    if (last !== undefined && last.paint === cell.paint && last.isBold === cell.isBold && last.isInverse === cell.isInverse) {
+      last.text += cell.char
+    } else {
+      spans.push({
+        text: cell.char,
+        paint: cell.paint,
+        ...(cell.isBold ? { isBold: true as const } : {}),
+        ...(cell.isInverse ? { isInverse: true as const } : {}),
+      })
+    }
+  }
+  return spans
+}
+
+/** Paints every box of every shelf, and answers where a click selects which. */
+function paintBoxes(canvas: Canvas, shelves: Shelf[]): Hit[] {
+  const hits: Hit[] = []
+  for (const { y, boxes } of shelves) {
+    for (const box of boxes) {
+      const border = { paint: borderOf(box) }
+      const [topLeft = '', topRight = '', bottomLeft = '', bottomRight = ''] = box.frame.corners
+      const bar = box.frame.across.repeat(box.width - 2)
+      canvas.put(box.x, y, `${topLeft}${bar}${topRight}`, border)
+      canvas.put(box.x, y + 1, box.frame.down, border)
+      canvas.put(box.x + box.width - 1, y + 1, box.frame.down, border)
+      canvas.put(box.x, y + 2, `${bottomLeft}${bar}${bottomRight}`, border)
+      canvas.put(box.x + 2, y + 1, box.label, {
+        paint: box.paint,
+        ...(box.isSelected ? { isBold: true as const, isInverse: true as const } : {}),
+      })
+      hits.push({ id: box.id, x: box.x, y, width: box.width, height: BOX_ROWS })
+    }
+  }
+  return hits
+}
+
+/** Which ways an edge leaves a cell of the row the edges run along; a cell several edges share shows all of theirs. */
+const UP = 1
+const DOWN = 2
+const LEFT = 4
+const RIGHT = 8
+
+const JUNCTIONS: Record<number, string> = {
+  [UP | DOWN]: '│',
+  [LEFT | RIGHT]: '─',
+  [DOWN | RIGHT]: '┌',
+  [DOWN | LEFT]: '┐',
+  [UP | RIGHT]: '└',
+  [UP | LEFT]: '┘',
+  [UP | DOWN | RIGHT]: '├',
+  [UP | DOWN | LEFT]: '┤',
+  [DOWN | LEFT | RIGHT]: '┬',
+  [UP | LEFT | RIGHT]: '┴',
+  [UP | DOWN | LEFT | RIGHT]: '┼',
+}
+
+/**
+ * Paints the edges between one shelf and the one under it. An edge leaves the
+ * upper box straight down where that box reaches over the lower one, else
+ * from its middle, and what touches the selected node is lit over what does not.
+ */
+function paintEdges(canvas: Canvas, upper: Shelf, lower: Shelf, uses: (upper: Box, lower: Box) => boolean): void {
+  const runY = upper.y + BOX_ROWS
+  const run = new Map<number, { ways: number; isLit: boolean }>()
+  const lit = new Set<string>()
+  const mark = (x: number, way: number, isLit: boolean): void => {
+    const at = run.get(x) ?? { ways: 0, isLit: false }
+    run.set(x, { ways: at.ways | way, isLit: at.isLit || isLit })
+  }
+  const paintOnce = (x: number, y: number, char: string, isLit: boolean, unlit: Paint): void => {
+    if (lit.has(`${x},${y}`)) return
+    if (isLit) lit.add(`${x},${y}`)
+    canvas.put(x, y, char, { paint: isLit ? 'accent' : unlit })
+  }
+  for (const from of upper.boxes) {
+    for (const to of lower.boxes.filter(box => uses(from, box))) {
+      const isLit = from.isSelected || to.isSelected
+      const into = centerOf(to)
+      const out = into > from.x && into < from.x + from.width - 1 ? into : centerOf(from)
+      paintOnce(out, runY - 1, from.frame.exit, isLit, borderOf(from))
+      paintOnce(into, runY + 1, '▼', isLit, 'dim')
+      mark(out, UP, isLit)
+      mark(into, DOWN, isLit)
+      for (let x = Math.min(out, into); x <= Math.max(out, into); x += 1) {
+        if (x > Math.min(out, into)) mark(x, LEFT, isLit)
+        if (x < Math.max(out, into)) mark(x, RIGHT, isLit)
+      }
+    }
+  }
+  for (const [x, at] of run) canvas.put(x, runY, JUNCTIONS[at.ways] ?? ' ', { paint: at.isLit ? 'accent' : 'dim' })
+}
+
+/**
+ * The run of layers that fits down `rows`: as many as do, around the selected
+ * layer and toward the change, leaving a row for each line that counts a cut.
+ */
+function layersIn(layers: RippleNode[][], selected: string | null, rows: number): [start: number, end: number] {
+  const changed = Math.max(
+    0,
+    layers.findIndex(layer => layer.some(node => node.role === 'changed')),
+  )
+  const at = layers.findIndex(layer => layer.some(node => node.id === selected))
+  for (let count = layers.length; count > 1; count -= 1) {
+    const [start, end] = windowOf(layers.length, count, at === -1 ? changed : at, changed)
+    const cuts = (start > 0 ? 1 : 0) + (end < layers.length ? 1 : 0)
+    if (count * BOX_ROWS + (count - 1) * EDGE_ROWS + cuts <= rows) return [start, end]
+  }
+  return windowOf(layers.length, 1, at === -1 ? changed : at, changed)
 }
 
 /** Draws the map as a graph in `room`, around the selected node. */
@@ -248,99 +349,27 @@ export function drawGraph(report: RippleReport, selected: string | null, room: R
   const near = new Set(
     report.edges.flatMap(edge => (edge.from === selected ? [edge.to] : edge.to === selected ? [edge.from] : [])),
   )
+  const uses = (upper: Box, lower: Box): boolean =>
+    report.edges.some(edge => upper.ids.includes(edge.from) && lower.ids.includes(edge.to))
 
-  // Which layers fit down the room: as many as do, around the selected one and toward the change.
-  const heightOf = (count: number): number => count * BOX_ROWS + (count - 1) * EDGE_ROWS
-  const selectedLayer = layers.findIndex(layer => layer.some(node => node.id === selected))
-  const changedLayer = Math.max(
-    0,
-    layers.findIndex(layer => layer.some(node => node.role === 'changed')),
-  )
-  const keep = selectedLayer === -1 ? changedLayer : selectedLayer
-  let [start, end] = [0, layers.length]
-  for (let count = layers.length; count >= 1; count -= 1) {
-    ;[start, end] = windowOf(layers.length, count, keep, changedLayer)
-    const cut = (start > 0 ? 1 : 0) + (end < layers.length ? 1 : 0)
-    if (heightOf(count) + cut <= room.rows) break
-  }
+  const [start, end] = layersIn(layers, selected, room.rows)
   const top = start > 0 ? 1 : 0
-  const height = top + heightOf(end - start) + (end < layers.length ? 1 : 0)
-
-  // Seat the layer nearest the change first, then each layer by the one it was seated against.
-  const placed = layers.slice(start, end).map((layer, index) => ({
+  const shelves: Shelf[] = layers.slice(start, end).map((layer, index) => ({
     y: top + index * (BOX_ROWS + EDGE_ROWS),
     boxes: boxesOf(layer, columns, selected, near),
   }))
-  const uses = (upper: Box, lower: Box): boolean =>
-    report.edges.some(edge => upper.ids.includes(edge.from) && lower.ids.includes(edge.to))
-  const middle = Math.min(Math.max(changedLayer - start, 0), placed.length - 1)
-  placed.forEach((_, step) => {
-    for (const index of step === 0 ? [middle] : [middle - step, middle + step]) {
-      const layer = placed[index]
-      if (layer === undefined) continue
-      const beside = step === 0 ? [] : (placed[index < middle ? index + 1 : index - 1]?.boxes ?? [])
-      seat(layer.boxes, columns, beside, (box, other) => (index < middle ? uses(box, other) : uses(other, box)))
-    }
+  const changed = layers.findIndex(layer => layer.some(node => node.role === 'changed'))
+  seatAll(shelves, Math.min(Math.max(changed - start, 0), shelves.length - 1), columns, uses)
+
+  const height = top + shelves.length * BOX_ROWS + (shelves.length - 1) * EDGE_ROWS + (end < layers.length ? 1 : 0)
+  const canvas = canvasOf(columns, height)
+  const hits = paintBoxes(canvas, shelves)
+  shelves.slice(0, -1).forEach((upper, index) => {
+    const lower = shelves[index + 1]
+    if (lower !== undefined) paintEdges(canvas, upper, lower, uses)
   })
 
-  const cells: Cell[][] = Array.from({ length: height }, () =>
-    Array.from({ length: columns }, () => ({ char: ' ', paint: 'plain' as Paint })),
-  )
-  const put = (x: number, y: number, text: string, style: Omit<Cell, 'char'>): void => {
-    ;[...text].forEach((char, index) => {
-      const row = cells[y]
-      if (row !== undefined && x + index >= 0 && x + index < columns) row[x + index] = { char, ...style }
-    })
-  }
-
-  const hits: Hit[] = []
-  for (const { y, boxes } of placed) {
-    for (const box of boxes) {
-      const border = { paint: borderOf(box) }
-      const [topLeft = '', topRight = '', bottomLeft = '', bottomRight = ''] = box.frame.corners
-      const bar = box.frame.across.repeat(box.width - 2)
-      put(box.x, y, `${topLeft}${bar}${topRight}`, border)
-      put(box.x, y + 1, box.frame.down, border)
-      put(box.x + box.width - 1, y + 1, box.frame.down, border)
-      put(box.x, y + 2, `${bottomLeft}${bar}${bottomRight}`, border)
-      put(box.x + 2, y + 1, box.label, {
-        paint: box.paint,
-        ...(box.isSelected ? { isBold: true as const, isInverse: true as const } : {}),
-      })
-      hits.push({ id: box.id, x: box.x, y, width: box.width, height: BOX_ROWS })
-    }
-  }
-
-  // The edges between each layer and the one under it, lit where they touch the selected node.
-  placed.slice(0, -1).forEach((upper, index) => {
-    const lower = placed[index + 1]
-    if (lower === undefined) return
-    const runY = upper.y + BOX_ROWS
-    const ways = new Map<number, { ways: number; isLit: boolean }>()
-    const mark = (x: number, way: number, isLit: boolean): void => {
-      const at = ways.get(x) ?? { ways: 0, isLit: false }
-      ways.set(x, { ways: at.ways | way, isLit: at.isLit || isLit })
-    }
-    for (const from of upper.boxes) {
-      for (const to of lower.boxes.filter(box => uses(from, box))) {
-        const isLit = from.isSelected || to.isSelected
-        const into = centerOf(to)
-        // Straight down where the box above reaches over the one below; else out of its middle.
-        const out = into > from.x && into < from.x + from.width - 1 ? into : centerOf(from)
-        put(out, upper.y + BOX_ROWS - 1, from.frame.exit, { paint: isLit ? 'accent' : borderOf(from) })
-        mark(out, UP, isLit)
-        mark(into, DOWN, isLit)
-        for (let x = Math.min(out, into); x <= Math.max(out, into); x += 1) {
-          if (x > Math.min(out, into)) mark(x, LEFT, isLit)
-          if (x < Math.max(out, into)) mark(x, RIGHT, isLit)
-        }
-        if (isLit || cells[runY + 1]?.[into]?.char !== '▼') put(into, runY + 1, '▼', { paint: isLit ? 'accent' : 'dim' })
-      }
-    }
-    for (const [x, at] of ways) put(x, runY, LINES[at.ways] ?? ' ', { paint: at.isLit ? 'accent' : 'dim' })
-  })
-
-  const rows = cells.map(spansOf)
+  const rows = canvas.cells.map(spansOf)
   const countIn = (some: RippleNode[][]): number => some.reduce((sum, layer) => sum + layer.length, 0)
   const above = layers[start - 1]?.[0]
   if (above !== undefined) {

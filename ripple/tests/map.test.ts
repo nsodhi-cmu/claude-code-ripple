@@ -104,6 +104,85 @@ describe('reading a report', () => {
     expect(depths(report)).toEqual({ core: 0, loose: 1, helper: 1, viaHelper: 1 })
   })
 
+  test('a use reported the right way stands, even from a nearer dependent to a farther one', () => {
+    const edges = [
+      { from: 'a', to: 'core' },
+      { from: 'x', to: 'core' },
+      { from: 'b', to: 'a' },
+      { from: 'x', to: 'b' },
+    ]
+    const { report, notes } = read({ method: 'lsp', nodes: [CORE, reported('a'), reported('x'), reported('b')], edges })
+    expect(depths(report)).toEqual({ core: 0, a: 1, x: 1, b: 2 })
+    expect(report.edges).toEqual(edges)
+    expect(notes).toEqual([])
+  })
+
+  test('an edge is turned only where it had to be read backward or its roles cannot be a use, and each is noted', () => {
+    const { report, notes } = read({
+      method: 'grep',
+      nodes: [CORE, reported('a'), reported('b'), reported('helper', { role: 'dependency' })],
+      edges: [
+        { from: 'core', to: 'a' },
+        { from: 'a', to: 'b' },
+        { from: 'helper', to: 'core' },
+      ],
+    })
+    expect(depths(report)).toEqual({ core: 0, a: 1, b: 2, helper: 1 })
+    expect(report.edges).toEqual([
+      { from: 'a', to: 'core' },
+      { from: 'b', to: 'a' },
+      { from: 'core', to: 'helper' },
+    ])
+    expect(notes).toEqual(['turned 3 edges that ran from the used to the user'])
+  })
+
+  test('a changed symbol keeps the risk another change puts it at, and a dependency never has one', () => {
+    const { report } = read({
+      method: 'lsp',
+      nodes: [
+        CORE,
+        reported('alsoEdited', { role: 'changed', change: 'behavior', risk: 'breaks', reason: 'still passes 1 argument' }),
+        reported('helper', { role: 'dependency', risk: 'review' }),
+      ],
+      edges: [],
+    })
+    expect(report.nodes.map(node => node.risk)).toEqual(['ok', 'breaks', 'ok'])
+    expect(headerText(report)).toBe('Ripple · 2 changes → 0 dependents · 1 breaks')
+  })
+
+  test('what a model writes is made safe to draw: no control character or line break survives in any field', () => {
+    const { report } = read({
+      method: 'lsp',
+      summary: 'one\ntwo\u001b[31m three',
+      nodes: [
+        {
+          id: 'a\nb',
+          name: 'render\nCart\tx',
+          kind: 'func\u0007tion',
+          file: 'src/\u001b[2Jcart.ts',
+          role: 'Dependent',
+          risk: 'BREAKS',
+          reason: 'line one\r\nline two',
+        },
+        CORE,
+      ],
+      edges: [{ from: 'a\nb', to: 'core' }],
+    })
+    const [node] = report.nodes
+    expect(node).toMatchObject({
+      id: 'a b',
+      name: 'render Cart x',
+      kind: 'func tion',
+      file: 'src/ [2Jcart.ts',
+      role: 'dependent',
+      risk: 'breaks',
+      reason: 'line one line two',
+    })
+    expect(report.summary).toBe('one two [31m three')
+    expect(report.edges).toEqual([{ from: 'a b', to: 'core' }])
+    expect(JSON.stringify(report)).not.toMatch(/\\u00[01]|\\n|\\t|\\r/)
+  })
+
   test('a node says its role or is given one: changed when it carries a change, else a dependent', () => {
     const { report } = read({
       method: 'lsp',
@@ -124,7 +203,7 @@ describe('reading a report', () => {
         role: 'changed',
         depth: 0,
         change: 'renamed',
-        risk: 'ok',
+        risk: 'breaks',
         isTested: false,
       },
       {
@@ -192,6 +271,29 @@ describe('reading a report', () => {
     expect(notes).toEqual([`kept ${MAX_NODES} of ${MAX_NODES + 8} nodes`])
   })
 
+  test('a map the cap cut reads back from the store exactly as it was drawn', () => {
+    const fillers = Array.from({ length: MAX_NODES + 2 }, (_, index) => reported(`filler${index}`))
+    const chain = [
+      reported('parent'),
+      reported('deep', { risk: 'breaks', reason: 'gone' }),
+      reported('deeper', { risk: 'review', reason: 'differs' }),
+    ]
+    const { report } = read({
+      method: 'grep',
+      nodes: [CORE, ...fillers, ...chain],
+      edges: [
+        ...fillers.map(filler => ({ from: filler.id, to: 'core' })),
+        { from: 'parent', to: 'core' },
+        { from: 'deep', to: 'parent' },
+        { from: 'deeper', to: 'deep' },
+      ],
+    })
+    expect(report.nodes.find(node => node.id === 'parent')).toBeUndefined()
+    expect(depths(report)).toMatchObject({ deep: 1, deeper: 2 })
+    const origin = { scope: 'uncommitted' as const, base: 'HEAD', focus: '', print: '1:a' }
+    expect(readStored(JSON.parse(JSON.stringify({ ...report, ...origin })))).toEqual({ ...report, ...origin })
+  })
+
   test('a reason or a summary too long to draw is cut, and ends on an ellipsis to say so', () => {
     const long = 'word '.repeat(100).trim()
     const { report } = read({
@@ -203,6 +305,9 @@ describe('reading a report', () => {
     const reason = report.nodes[1]?.reason ?? ''
     expect(reason).toHaveLength(200)
     expect(reason).toEndWith('word word…')
+    const rockets = read({ method: 'lsp', nodes: [reported('🚀'.repeat(90))], edges: [] }).report.nodes[0]?.name ?? ''
+    expect([...rockets]).toHaveLength(80)
+    expect(rockets).toEndWith('🚀…')
     expect(report.summary).toHaveLength(240)
     expect(report.summary).toEndWith('…')
     expect(read({ method: 'lsp', summary: 'Nothing breaks.', nodes: [], edges: [] }).report.summary).toBe('Nothing breaks.')
@@ -253,12 +358,14 @@ describe('what the person reads', () => {
     )
   })
 
-  test('the status line speaks only while mapping or while something is flagged', () => {
-    expect(statusText(null, false)).toBe(undefined)
-    expect(statusText(SHOP_MAP, true)).toBe('mapping…')
-    expect(statusText(SHOP_MAP, false)).toBe('2 break · 1 to review · /ripple')
+  test('the status line speaks only while mapping, or while a map that is still current has something flagged', () => {
+    expect(statusText(null, false, false)).toBe(undefined)
+    expect(statusText(SHOP_MAP, true, false)).toBe('mapping…')
+    expect(statusText(SHOP_MAP, false, false)).toBe('2 break · 1 to review · /ripple')
     const calm = { ...SHOP_MAP, nodes: SHOP_MAP.nodes.map(node => ({ ...node, risk: 'ok' as const })) }
-    expect(statusText(calm, false)).toBe(undefined)
+    expect(statusText(calm, false, false)).toBe(undefined)
+    expect(statusText(SHOP_MAP, false, true)).toBe(undefined)
+    expect(statusText(SHOP_MAP, true, true)).toBe('mapping…')
   })
 
   test('what breaks is listed before what needs review, whatever order they were reported in', () => {

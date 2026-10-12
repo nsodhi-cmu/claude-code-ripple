@@ -78,6 +78,29 @@ describe('the tree', () => {
     expect(outline(two)).toEqual(['core', '└─ helper', '   └─ helperOfHelper', 'other', '└─ usesOther', 'loose'])
     expect(treeOf(two).map(row => row.parent)).toEqual([null, 'core', 'helper', null, 'other', null])
   })
+
+  test('nodes cut off from the change still hang from one another, whatever order they were reported in', () => {
+    const adrift: RippleReport = {
+      method: 'grep',
+      nodes: [node('deeper', { depth: 2 }), CORE, node('deep')],
+      edges: [{ from: 'deeper', to: 'deep' }],
+    }
+    expect(outline(adrift)).toEqual(['core', 'deep', '└─ deeper'])
+  })
+
+  test('a dependent that uses a dependency does not carry it off from under the change', () => {
+    const shared: RippleReport = {
+      method: 'lsp',
+      nodes: [CORE, node('user'), node('helper', { role: 'dependency' }), node('inner', { role: 'dependency', depth: 2 })],
+      edges: [
+        { from: 'user', to: 'core' },
+        { from: 'core', to: 'helper' },
+        { from: 'helper', to: 'inner' },
+        { from: 'user', to: 'inner' },
+      ],
+    }
+    expect(outline(shared)).toEqual(['core', '├─ user', '└─ helper', '   └─ inner'])
+  })
 })
 
 describe('the drawing', () => {
@@ -115,9 +138,17 @@ describe('the drawing', () => {
 
   test('every row is a hit across the room at its own line', () => {
     const { hits } = drawTree(SHOP_MAP, null, { columns: 50, rows: 40 })
-    expect(hits.map(hit => [hit.id, hit.y, hit.width, hit.height])).toEqual(
-      treeOf(SHOP_MAP).map((row, index) => [row.node.id, index, 50, 1]),
-    )
+    expect(hits.map(hit => [hit.id, hit.y, hit.width, hit.height])).toEqual([
+      [id('formatPrice'), 0, 50, 1],
+      [id('renderCart'), 1, 50, 1],
+      [id('CheckoutPage'), 2, 50, 1],
+      [id('renderInvoice'), 3, 50, 1],
+      [id('InvoicePage'), 4, 50, 1],
+      [id('priceLabel'), 5, 50, 1],
+      [id('emailReceipt'), 6, 50, 1],
+      [id('toFixed2'), 7, 50, 1],
+      [id('currencySymbol'), 8, 50, 1],
+    ])
   })
 
   test('a room too short keeps the rows around the selection, counts what it cut, and lets a click reach it', () => {
@@ -137,11 +168,22 @@ describe('the drawing', () => {
     ])
   })
 
-  test('at the top of a cut tree nothing is said to be above', () => {
-    const rows = drawTree(SHOP_MAP, id('formatPrice'), { columns: 90, rows: 6 }).rows.map(rowText)
-    expect(rows[0]).toBe('')
-    expect(rows[1]).toStartWith('◆ formatPrice')
-    expect(rows.at(-1)).toBe('↓ 5 more below')
+  test('a cut is counted only on the side that has one, so no row is spent saying nothing', () => {
+    const top = drawTree(SHOP_MAP, id('formatPrice'), { columns: 90, rows: 6 })
+    expect(top.rows.map(rowText)[0]).toStartWith('◆ formatPrice')
+    expect(top.rows.map(rowText).at(-1)).toBe('↓ 4 more below')
+    expect(top.rows).toHaveLength(6)
+    expect(top.hits.map(hit => hit.y)).toEqual([0, 1, 2, 3, 4, 5])
+
+    const bottom = drawTree(SHOP_MAP, id('currencySymbol'), { columns: 90, rows: 6 }).rows.map(rowText)
+    expect(bottom[0]).toBe('↑ 4 more above')
+    expect(bottom.at(-1)).toBe('└─ → currencySymbol   src/price.ts:13')
+  })
+
+  test('a tree one row too tall loses one node to the line that says so, not two', () => {
+    const rows = drawTree(SHOP_MAP, id('formatPrice'), { columns: 90, rows: 8 }).rows.map(rowText)
+    expect(rows).toHaveLength(8)
+    expect(rows.at(-1)).toBe('↓ 2 more below')
   })
 })
 

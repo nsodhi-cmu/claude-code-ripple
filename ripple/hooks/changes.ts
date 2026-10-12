@@ -1,7 +1,7 @@
 import type { RippleScope } from '../types'
 
-// The changes Ripple maps, as git reports them. Nothing here touches `$`:
-// register.tsx runs the commands these functions name and hands back the text.
+// The changes Ripple maps, as git reports them: register.tsx runs the
+// commands these functions name and hands back what they printed.
 
 /** What `/ripple <args>` asks for. */
 export type Request = { verb: 'map'; scope: RippleScope; focus: string } | { verb: 'web' | 'reset' }
@@ -17,14 +17,39 @@ export function readRequest(args: string): Request {
 }
 
 const GIT = ['git', '-c', 'core.quotePath=false'] as const
+/** Everything under the directory the command runs in, but what `/ripple web` writes there. */
+const PATHS = ['--', '.', ':(exclude).ripple'] as const
+/** The most untracked files whose contents are part of a print. */
+const HASHED_FILES = 200
 
-/** The working tree against `ref`, one hunk per change and no context lines. */
+/**
+ * The working tree against `ref`, one hunk per change and no context lines,
+ * spelled so that nothing in the person's git configuration changes its shape.
+ */
 export function diffCommand(ref: string): string[] {
-  return [...GIT, 'diff', ref, '--relative', '--unified=0', '--no-color', '--no-ext-diff']
+  return [
+    ...GIT,
+    'diff',
+    ref,
+    '--relative',
+    '--unified=0',
+    '--no-color',
+    '--no-ext-diff',
+    '--no-textconv',
+    '--src-prefix=a/',
+    '--dst-prefix=b/',
+    ...PATHS,
+  ]
 }
 
 /** The files git does not track yet, which no diff shows. */
-export const UNTRACKED_COMMAND: readonly string[] = [...GIT, 'ls-files', '--others', '--exclude-standard']
+export const UNTRACKED_COMMAND: readonly string[] = [...GIT, 'ls-files', '--others', '--exclude-standard', ...PATHS]
+
+/** What the untracked files hold, one hash a file, since their names alone do not say when one is edited. */
+export function hashCommand(untracked: string): string[] | undefined {
+  const files = untracked.split('\n').filter(line => line.trim() !== '')
+  return files.length === 0 ? undefined : ['git', 'hash-object', '--', ...files.slice(0, HASHED_FILES).map(pathOf)]
+}
 
 /** Where the default branch is looked for, first hit wins. */
 export const DEFAULT_BRANCH_COMMANDS: ReadonlyArray<readonly string[]> = [
@@ -106,14 +131,11 @@ function diffFiles(diff: string): ChangedFile[] {
   return files.filter(entry => entry.file !== '')
 }
 
-/** What `/ripple web` writes into a project is never a change to map. */
-const OWN_OUTPUT = '.ripple/'
-
 function untrackedFiles(listing: string): ChangedFile[] {
   return listing
     .split('\n')
     .map(pathOf)
-    .filter(file => file !== '' && !file.startsWith(OWN_OUTPUT))
+    .filter(file => file !== '')
     .map(file => ({ file, status: 'added' as const, hunks: 0 }))
 }
 
@@ -126,13 +148,16 @@ export function printOf(text: string): string {
   return `${text.length}:${(hash >>> 0).toString(16)}`
 }
 
-/** The changes of a scope, from the text of its diff and the listing of untracked files. */
-export function readChanges(scope: RippleScope, base: Base, diff: string, untracked: string): Changes {
+/**
+ * The changes of a scope, from what git printed: the diff, the listing of
+ * untracked files, and the hashes of what those files hold.
+ */
+export function readChanges(scope: RippleScope, base: Base, diff: string, untracked: string, hashes = ''): Changes {
   const files = [...diffFiles(diff), ...untrackedFiles(untracked)]
-  return { scope, base, files, print: printOf(`${scope}\n${diff}\n${untracked}`) }
+  return { scope, base, files, print: printOf([scope, diff, untracked, hashes].join('\n')) }
 }
 
-/** `2 files on this branch since main`, `1 uncommitted file`. */
+/** `2 files changed on this branch since main`, `1 uncommitted file`. */
 export function describeChanges(changes: Changes): string {
   const count = changes.files.length
   const files = `file${count === 1 ? '' : 's'}`

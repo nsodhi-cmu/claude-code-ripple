@@ -1,11 +1,13 @@
 import type { RippleEdge, RippleMap, RippleNode, RippleOrigin, RippleReport } from '../types'
 
 // The map as data: reading what the mapper reports, and saying what it holds.
-// Nothing here touches `$`.
 
 /** The most nodes a map holds. */
 export const MAX_NODES = 60
-/** The most characters of a reason and of a summary that are kept. */
+/** The most characters that are kept of each thing a mapper writes. */
+const NAME_CHARS = 80
+const FILE_CHARS = 300
+const KIND_CHARS = 16
 const REASON_CHARS = 200
 const SUMMARY_CHARS = 240
 export const REPORT_TOOL = 'mcp__ripple__report'
@@ -25,7 +27,7 @@ const METHOD_LABEL: Record<RippleReport['method'], string> = {
 export const REPORT_DESCRIPTION =
   "Ripple's mapper reports the impact map of a change with this tool. Nothing else calls it."
 
-/** The report tool's input schema: RippleReport, as JSON Schema. */
+/** The report tool's input schema: a RippleReport as a mapper writes one, with no depths. */
 export const REPORT_SCHEMA: Record<string, unknown> = {
   type: 'object',
   required: ['method', 'nodes', 'edges', 'summary'],
@@ -78,7 +80,7 @@ export const REPORT_SCHEMA: Record<string, unknown> = {
             type: 'string',
             enum: [...RISKS],
             description:
-              'Dependents only: breaks when it no longer compiles or runs as written, review when it may now behave differently, ok otherwise.',
+              'breaks when as written it will not compile or type-check, or throws when it runs; review when it runs but its result or side effect may differ; ok otherwise. For dependents, and for a changed symbol that another change breaks.',
           },
           isTested: { type: 'boolean', description: 'True when any test file references it.' },
           reason: {
@@ -105,12 +107,15 @@ function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === 'object' && value !== null && !Array.isArray(value)
 }
 
+/** A model's string made safe to draw: every control character and run of whitespace is one space. */
 function text(value: unknown): string {
-  return typeof value === 'string' ? value.trim() : ''
+  return typeof value === 'string' ? value.replace(/[\u0000-\u001f\u007f-\u009f\s]+/g, ' ').trim() : ''
 }
 
+/** The one of `allowed` a model named, in whatever case it wrote it. */
 function oneOf<T extends string>(allowed: readonly T[], value: unknown): T | undefined {
-  return allowed.find(option => option === value)
+  const named = text(value).toLowerCase()
+  return allowed.find(option => option === named)
 }
 
 /** A model sometimes sends an array as its JSON text; take either. */
@@ -125,9 +130,10 @@ function list(value: unknown): unknown[] | undefined {
   }
 }
 
-/** Cuts `value` to `max` characters, the last one an ellipsis when anything was cut. */
-function clip(value: string, max: number): string {
-  return value.length > max ? `${value.slice(0, max - 1).trimEnd()}…` : value
+/** Cuts `value` to `max` characters, the last of them an ellipsis when anything was cut. */
+export function clip(value: string, max: number): string {
+  const characters = [...value]
+  return characters.length > max ? `${characters.slice(0, Math.max(0, max - 1)).join('').trimEnd()}…` : value
 }
 
 export function plural(count: number, noun: string): string {
@@ -136,17 +142,17 @@ export function plural(count: number, noun: string): string {
 
 function readNode(raw: unknown): RippleNode | undefined {
   if (!isRecord(raw)) return undefined
-  const name = text(raw.name).slice(0, 80)
-  const file = text(raw.file).replace(/\\/g, '/').slice(0, 300)
+  const name = clip(text(raw.name), NAME_CHARS)
+  const file = clip(text(raw.file).replace(/\\/g, '/'), FILE_CHARS)
   if (name === '' || file === '') return undefined
   const change = oneOf(CHANGES, raw.change)
   const role = oneOf(ROLES, raw.role) ?? (change === undefined ? 'dependent' : 'changed')
   const kind = text(raw.kind)
     .toLowerCase()
     .replace(/[^a-z -]/g, '')
-    .slice(0, 16)
+    .slice(0, KIND_CHARS)
   const line = Number(raw.line)
-  const reason = clip(text(raw.reason).replace(/\s+/g, ' '), REASON_CHARS)
+  const reason = clip(text(raw.reason), REASON_CHARS)
   return {
     id: text(raw.id) || `${file}:${name}`,
     name,
@@ -155,7 +161,7 @@ function readNode(raw: unknown): RippleNode | undefined {
     line: Number.isFinite(line) ? Math.max(0, Math.round(line)) : 0,
     role,
     depth: 0,
-    risk: role === 'dependent' ? (oneOf(RISKS, raw.risk) ?? 'ok') : 'ok',
+    risk: role === 'dependency' ? 'ok' : (oneOf(RISKS, raw.risk) ?? 'ok'),
     isTested: raw.isTested === true || raw.isTested === 'true',
     ...(role === 'changed' && change !== undefined ? { change } : {}),
     ...(reason === '' ? {} : { reason }),
@@ -167,51 +173,80 @@ export function rankOf(node: RippleNode): number {
   return node.role === 'dependent' ? -node.depth : node.depth
 }
 
+/** Whether no symbol of role `from` can be the user of one of role `to`: the edge was reported backward. */
+function isImpossible(from: RippleNode['role'], to: RippleNode['role']): boolean {
+  return (from === 'changed' && to === 'dependent') || (from === 'dependency' && to !== 'dependency')
+}
+
 /**
- * Gives every node its depth and turns every edge to run from the user to
- * the used. Depth follows the edges as reported, outward from the changed
- * symbols; what that leaves unreached is then reached along edges read in
- * either direction, since a mapper that swaps `from` and `to` still means the use.
+ * Gives every node its depth, and turns the edges that were reported
+ * backward. Depth follows the edges as reported, outward from the changed
+ * symbols. What that leaves unreached is then reached along edges read
+ * against their direction, since a mapper that swaps `from` and `to` still
+ * means the use; those edges are turned, and so is any edge whose roles
+ * cannot be a use. Every other edge stands as reported. A node no edge ties
+ * to a changed symbol sits one step out, and what hangs from it beyond it.
  */
-function settle(nodes: RippleNode[], edges: RippleEdge[]): { nodes: RippleNode[]; edges: RippleEdge[] } {
+function settle(
+  nodes: RippleNode[],
+  edges: RippleEdge[],
+): { nodes: RippleNode[]; edges: RippleEdge[]; turned: number } {
   const users = new Map<string, string[]>()
   const used = new Map<string, string[]>()
   for (const { from, to } of edges) {
     users.set(to, [...(users.get(to) ?? []), from])
     used.set(from, [...(used.get(from) ?? []), to])
   }
-  const either = (id: string): string[] => [...(users.get(id) ?? []), ...(used.get(id) ?? [])]
   const roleOf = new Map(nodes.map(node => [node.id, node.role]))
   const depthOf = new Map(nodes.filter(node => node.role === 'changed').map(node => [node.id, 0]))
+  const backward = new Set<string>()
 
-  const reach = (side: 'dependent' | 'dependency', next: (id: string) => string[]): void => {
+  const reach = (side: 'dependent' | 'dependency', isEitherWay: boolean): void => {
+    const [forward, against] = side === 'dependent' ? [users, used] : [used, users]
     for (let depth = 0; ; depth += 1) {
       const frontier = [...depthOf]
         .filter(([id, at]) => at === depth && (depth === 0 || roleOf.get(id) === side))
         .map(([id]) => id)
       if (frontier.length === 0) return
-      for (const other of frontier.flatMap(next)) {
-        if (roleOf.get(other) === side && !depthOf.has(other)) depthOf.set(other, depth + 1)
+      for (const id of frontier) {
+        const ahead = forward.get(id) ?? []
+        for (const other of [...ahead, ...(isEitherWay ? (against.get(id) ?? []) : [])]) {
+          if (roleOf.get(other) !== side || depthOf.has(other)) continue
+          depthOf.set(other, depth + 1)
+          if (!ahead.includes(other)) backward.add(side === 'dependent' ? `${id}\n${other}` : `${other}\n${id}`)
+        }
       }
     }
   }
-  reach('dependent', id => users.get(id) ?? [])
-  reach('dependency', id => used.get(id) ?? [])
-  reach('dependent', either)
-  reach('dependency', either)
+  for (const side of ['dependent', 'dependency'] as const) {
+    reach(side, false)
+    reach(side, true)
+    const loose = new Set(nodes.filter(node => node.role === side && !depthOf.has(node.id)).map(node => node.id))
+    const nearer = side === 'dependent' ? used : users
+    for (const id of loose) {
+      if (!(nearer.get(id) ?? []).some(other => loose.has(other))) depthOf.set(id, 1)
+    }
+    reach(side, true)
+  }
 
-  const settled = nodes.map(node => ({ ...node, depth: depthOf.get(node.id) ?? 1 }))
-  const rank = new Map(settled.map(node => [node.id, rankOf(node)]))
   const seen = new Set<string>()
-  const turned: RippleEdge[] = []
+  const kept: RippleEdge[] = []
+  let turned = 0
   for (const edge of edges) {
-    const isBackward = (rank.get(edge.from) ?? 0) > (rank.get(edge.to) ?? 0)
+    const isBackward =
+      backward.has(`${edge.from}\n${edge.to}`) ||
+      isImpossible(roleOf.get(edge.from) ?? 'changed', roleOf.get(edge.to) ?? 'changed')
     const { from, to } = isBackward ? { from: edge.to, to: edge.from } : edge
     if (seen.has(`${from}\n${to}`)) continue
     seen.add(`${from}\n${to}`)
-    turned.push({ from, to })
+    kept.push({ from, to })
+    if (isBackward) turned += 1
   }
-  return { nodes: settled, edges: turned }
+  return {
+    nodes: nodes.map(node => ({ ...node, depth: depthOf.get(node.id) ?? 1 })),
+    edges: kept,
+    turned,
+  }
 }
 
 /** Past the cap: changed symbols first, then what breaks, then what needs review, then the nearest. */
@@ -219,21 +254,24 @@ function capNodes(nodes: RippleNode[]): RippleNode[] {
   const weight = (node: RippleNode): number =>
     node.role === 'changed' ? 0 : node.risk === 'breaks' ? 1 : node.risk === 'review' ? 2 : 2 + node.depth
   const kept = new Set(
-    nodes
-      .map((node, index) => ({ node, index }))
-      .sort((a, b) => weight(a.node) - weight(b.node) || a.index - b.index)
+    [...nodes]
+      .sort((a, b) => weight(a) - weight(b))
       .slice(0, MAX_NODES)
-      .map(entry => entry.node.id),
+      .map(node => node.id),
   )
   return nodes.filter(node => kept.has(node.id))
 }
 
+/** A report as it was read with what had to be repaired in it, or why it could not be read. */
 export type Read = { report: RippleReport; notes: string[] } | { error: string }
 
 /**
- * Reads what the mapper reported. Lenient on purpose: ids are made unique,
- * edges that name no node are dropped, and each repair is noted; only a
- * report that cannot be read at all is an error.
+ * Reads what the mapper reported. A node that cannot be read or repeats an
+ * id is dropped, as is an edge that names no node; edges reported backward
+ * are turned; past the cap the least important nodes are cut, and what is
+ * left is measured again, so that a map reads back from the store as it was
+ * drawn. Each of those is noted. Only a report with no readable node list
+ * is an error.
  */
 export function readReport(input: unknown): Read {
   if (!isRecord(input)) return { error: 'the input is not an object.' }
@@ -265,18 +303,23 @@ export function readReport(input: unknown): Read {
   if (unnamed > 0) notes.push(`dropped ${plural(unnamed, 'edge')} that named no node`)
 
   let settled = settle(nodes, edges)
+  if (settled.turned > 0) notes.push(`turned ${plural(settled.turned, 'edge')} that ran from the used to the user`)
   if (settled.nodes.length > MAX_NODES) {
     notes.push(`kept ${MAX_NODES} of ${settled.nodes.length} nodes`)
     const kept = capNodes(settled.nodes)
     const keptIds = new Set(kept.map(node => node.id))
-    settled = { nodes: kept, edges: settled.edges.filter(edge => keptIds.has(edge.from) && keptIds.has(edge.to)) }
+    settled = settle(
+      kept,
+      settled.edges.filter(edge => keptIds.has(edge.from) && keptIds.has(edge.to)),
+    )
   }
 
-  const summary = clip(text(input.summary).replace(/\s+/g, ' '), SUMMARY_CHARS)
+  const summary = clip(text(input.summary), SUMMARY_CHARS)
   return {
     report: {
       method: oneOf(METHODS, input.method) ?? 'grep',
-      ...settled,
+      nodes: settled.nodes,
+      edges: settled.edges,
       ...(summary === '' ? {} : { summary }),
     },
     notes,
@@ -341,10 +384,14 @@ export function originText(map: RippleMap): string {
   return parts.join(' · ')
 }
 
-/** The status line under the prompt, which the engine leads with the plugin's name; undefined when there is nothing to say. */
-export function statusText(map: RippleMap | null, isMapping: boolean): string | undefined {
+/**
+ * The status line under the prompt, which the engine leads with the plugin's
+ * name; undefined when there is nothing to say. A map the changes have left
+ * behind no longer speaks for them.
+ */
+export function statusText(map: RippleMap | null, isMapping: boolean, isStale: boolean): string | undefined {
   if (isMapping) return 'mapping…'
-  const said = map === null ? '' : flaggedText(countsOf(map))
+  const said = map === null || isStale ? '' : flaggedText(countsOf(map))
   return said === '' ? undefined : `${said} · /ripple`
 }
 

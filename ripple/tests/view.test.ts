@@ -3,9 +3,18 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { RippleMap } from '../types'
 import { SHOP_MAP } from './fixture'
 import { rowText } from '../hooks/draw'
-import { GRAPH_COLUMNS } from '../hooks/graph'
-import { GRAPH_ROWS } from '../hooks/graph'
-import { MOVES, detailOf, drawView, modeIn, nextFlagged, planOf, selectedOf, stepped } from '../hooks/view'
+import { GRAPH_COLUMNS, GRAPH_ROWS } from '../hooks/graph'
+import {
+  detailOf,
+  drawView,
+  flowRows,
+  modeIn,
+  nextFlagged,
+  planOf,
+  selectedOf,
+  stepped,
+  wrappedRows,
+} from '../hooks/view'
 
 const id = (name: string): string => node(name).id
 
@@ -40,11 +49,6 @@ describe('stepping', () => {
 
   test('a step with nothing selected yet is taken from where a reader starts', () => {
     expect(stepped(SHOP_MAP, 'graph', null, 'right')).toBe(id('renderInvoice'))
-  })
-
-  test('the letters under the arrows move the same way', () => {
-    expect([MOVES.h, MOVES.j, MOVES.k, MOVES.l]).toEqual([MOVES.left, MOVES.down, MOVES.up, MOVES.right])
-    expect(MOVES.n).toBeUndefined()
   })
 
   test('next flagged goes through what breaks, then what needs review, and round again', () => {
@@ -84,24 +88,47 @@ describe('drawing the view', () => {
 })
 
 describe('sharing out the pane', () => {
-  const said = {
-    summary: 'x'.repeat(150),
-    verdict: 'y'.repeat(100),
-    links: 'uses formatPrice',
-    hasNotice: false,
-  }
+  const LEGEND = ['◆ changed', '● breaks', '▲ review', '○ ok', '→ uses']
+  const KEYS = ['←', '↓', '↑', '→', 'next flagged', 'tree view', 'ask Claude', 're-map', 'web page']
+  const said = { summary: 'word '.repeat(30).trim(), hasNotice: false, legend: LEGEND, keys: KEYS }
+
+  test('text is counted as it wraps at spaces, not by its length', () => {
+    expect(wrappedRows('', 10)).toBe(0)
+    expect(wrappedRows('fits here', 10)).toBe(1)
+    expect(wrappedRows('aaaa bb cccc', 6)).toBe(3)
+    expect(wrappedRows('a word-that-is-longer-than-the-row b', 10)).toBe(5)
+    expect(wrappedRows(said.summary, 76)).toBe(2)
+  })
+
+  test('things laid side by side wrap onto a new row when the next one does not fit', () => {
+    expect(flowRows([], 80)).toBe(0)
+    expect(flowRows([10, 10, 10], 34)).toBe(1)
+    expect(flowRows([10, 10, 10], 33)).toBe(2)
+    expect(flowRows([40, 40, 40], 30)).toBe(3)
+  })
 
   test('a roomy pane says everything and gives the map what is left', () => {
-    // Header, origin, two lines of summary, legend, three gaps, the detail's four lines, two rows of keys.
-    expect(planOf({ columns: 76, rows: 40 }, said)).toEqual({ isCompact: false, mapRows: 40 - 14 })
+    expect(planOf({ columns: 76, rows: 40 }, said)).toEqual({
+      isCompact: false,
+      mapRows: 40 - 5 - 3 - 6,
+      detail: { verdict: 2, links: 1 },
+    })
     expect(planOf({ columns: 76, rows: 40 }, { ...said, hasNotice: true }).mapRows).toBe(40 - 15)
     expect(planOf({ columns: 76, rows: 40 }, { ...said, summary: '' }).mapRows).toBe(40 - 12)
   })
 
-  test('a short pane keeps the header, one line of verdict, and the keys, and the map takes the rest', () => {
-    expect(planOf({ columns: 96, rows: 18 }, said)).toEqual({ isCompact: true, mapRows: 14 })
-    expect(planOf({ columns: 76, rows: 18 }, said).mapRows).toBe(13)
-    expect(planOf({ columns: 96, rows: 18 }, { ...said, verdict: '', hasNotice: true }).mapRows).toBe(14)
+  test('the keys take one row where the pane is wide enough for them and more where it is not', () => {
+    expect(planOf({ columns: 92, rows: 40 }, said).mapRows).toBe(planOf({ columns: 91, rows: 40 }, said).mapRows + 1)
+    expect(planOf({ columns: 40, rows: 40 }, said).mapRows).toBe(40 - 2 - 4 - 2 - 3 - 4 - 3)
+  })
+
+  test('a short pane keeps the header, two rows on the selected node, and the keys, and the map takes the rest', () => {
+    expect(planOf({ columns: 96, rows: 18 }, said)).toEqual({
+      isCompact: true,
+      mapRows: 18 - 1 - 2 - 1,
+      detail: { verdict: 1, links: 0 },
+    })
+    expect(planOf({ columns: 76, rows: 18 }, { ...said, hasNotice: true }).mapRows).toBe(18 - 1 - 1 - 2 - 2)
   })
 
   test('however short the pane, the map keeps enough rows to show a node between its cut lines', () => {

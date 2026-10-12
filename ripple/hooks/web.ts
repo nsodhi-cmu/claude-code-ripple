@@ -1,8 +1,8 @@
 import type { RippleNode, RippleReport } from '../types'
-import { headerText } from './map'
+import { locOf, wordsOf } from './draw'
+import { clip, headerText } from './map'
 
 // The ring view: the map as an SVG string, and the web page that holds it.
-// Nothing here touches `$`.
 
 type Family = {
   changed: RippleNode[]
@@ -35,25 +35,6 @@ function familyOf(map: RippleReport): Family {
     if (parent !== undefined) parentOf.set(node.id, parent)
   }
   return { changed, near, far, dependencies, parentOf }
-}
-
-function noteOf(node: RippleNode): string {
-  const parts: string[] = []
-  if (node.role === 'changed') {
-    if (node.change === 'signature' || node.change === 'behavior') parts.push(`${node.change} changed`)
-    else parts.push(node.change ?? 'changed')
-  }
-  if (node.risk !== 'ok') parts.push(node.risk)
-  if (!node.isTested && node.role !== 'dependency') parts.push('untested')
-  return parts.join(' · ')
-}
-
-function clip(value: string, max: number): string {
-  return value.length > max ? `${value.slice(0, Math.max(1, max - 1))}…` : value
-}
-
-function locOf(node: RippleNode): string {
-  return node.line > 0 ? `${node.file}:${node.line}` : node.file
 }
 
 /** The ring view's geometry, in the SVG's own units. */
@@ -124,7 +105,7 @@ function seatFar(
       seat.angle = first.angle + index * step
     })
   }
-  // The seats are in angle order: a seat's room is the way to its nearer neighbour.
+  // The seats are in angle order: a seat's room is the way to its nearer neighbor.
   return seats.map((seat, index) => {
     const before = seats[(index - 1 + seats.length) % seats.length] ?? seat
     const after = seats[(index + 1) % seats.length] ?? seat
@@ -232,7 +213,7 @@ function dotOf(ring: RingName): number {
 }
 
 function statusWords(node: RippleNode): string {
-  const words = noteOf(node).toLowerCase()
+  const words = wordsOf(node).join(' · ')
   if (words !== '') return words
   return node.role === 'dependency' ? 'dependency' : 'ok'
 }
@@ -300,7 +281,7 @@ export const KEY: ReadonlyArray<{ label: string; fill: string; isDashed?: true; 
   {
     label: 'changed',
     fill: INK.changed,
-    means: 'A symbol the changes touch: a function, a type, a constant. They sit at the center.',
+    means: 'A symbol the changes touch: a function, a type, a field, a constant. They sit at the center.',
   },
   {
     label: 'breaks',
@@ -315,7 +296,7 @@ export const KEY: ReadonlyArray<{ label: string; fill: string; isDashed?: true; 
   },
   { label: 'ok', fill: INK.ok, means: 'A dependent the change does not affect.' },
   {
-    label: 'dependency',
+    label: 'uses',
     fill: INK.dependency,
     means: 'A symbol a changed one uses. Shown for context on the dashed inner ring; it is not judged.',
   },
@@ -380,7 +361,6 @@ export function ringSvg(map: RippleReport, options: SvgOptions = {}): string {
     const { node } = spot
     const dot = dotOf(spot.ring)
     const isDependency = spot.ring === 'dependencies'
-    // A `file:line` under the name needs about 130 units clear; a name alone, 60.
     const isDense = spot.room < 60
     const hasSub = options.isBare !== true && !isDependency && spot.room >= 120
     const label = labelOf(spot, isAlone, hasSub)
@@ -418,7 +398,6 @@ export function ringSvg(map: RippleReport, options: SvgOptions = {}): string {
 
   out.push('</svg>')
   const svg = out.join('')
-  // A full map is a fifth of the limit; this only guards a pathological one.
   return svg.length > SVG_LIMIT && options.isBare !== true ? ringSvg(map, { ...options, isBare: true }) : svg
 }
 

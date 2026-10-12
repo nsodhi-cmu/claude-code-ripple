@@ -1,6 +1,6 @@
 # Ripple
 
-**See what your changes reach.** Ripple is a Claude Code mod. Run `/ripple` and a read-only agent traces everything that depends on the code you changed. The map is drawn inside Claude Code: what changed, what uses it, and which of those the change breaks.
+Ripple is a Claude Code mod that maps what a code change reaches. Run `/ripple` and a background agent traces what depends on the code you changed. The map is drawn inside Claude Code: what changed, what uses it, and which of those the change breaks.
 
 ```
 Ripple · 1 change → 6 dependents · 2 break · 1 to review
@@ -8,24 +8,24 @@ uncommitted changes · via LSP
 Two callers of formatPrice no longer compile, and receipts may show the wrong currency.
 ◆ changed  ● breaks  ▲ review  ○ ok  → uses
 
-   ┌────────────────┐  ┌───────────────┐
-   │ ○ CheckoutPage │  │ ○ InvoicePage │
-   └────────┬───────┘  └───────┬───────┘
-            │                  │
-            ▼                  ▼
-    ╔══════════════╗  ┌─────────────────┐  ┌──────────────┐  ┌────────────────┐
-    ║ ● renderCart ║  │ ● renderInvoice │  │ ○ priceLabel │  │ ▲ emailReceipt │
-    ╚═══════╤══════╝  └────────┬────────┘  └───────┬──────┘  └────────┬───────┘
-            └──────────────────┴─────────┬─────────┴──────────────────┘
-                                         ▼
-                                 ┌───────────────┐
-                                 │ ◆ formatPrice │
-                                 └───────┬───────┘
-                                ┌────────┴─────────┐
-                                ▼                  ▼
-                         ┌────────────┐  ┌──────────────────┐
-                         │ → toFixed2 │  │ → currencySymbol │
-                         └────────────┘  └──────────────────┘
+       ┌────────────────┐  ┌───────────────┐
+       │ ○ CheckoutPage │  │ ○ InvoicePage │
+       └────────┬───────┘  └───────┬───────┘
+                │                  │
+                ▼                  ▼
+        ╔══════════════╗  ┌─────────────────┐  ┌──────────────┐  ┌────────────────┐
+        ║ ● renderCart ║  │ ● renderInvoice │  │ ○ priceLabel │  │ ▲ emailReceipt │
+        ╚═══════╤══════╝  └────────┬────────┘  └───────┬──────┘  └────────┬───────┘
+                └──────────────────┴─────────┬─────────┴──────────────────┘
+                                             ▼
+                                     ┌───────────────┐
+                                     │ ◆ formatPrice │
+                                     └───────┬───────┘
+                                    ┌────────┴─────────┐
+                                    ▼                  ▼
+                             ┌────────────┐  ┌──────────────────┐
+                             │ → toFixed2 │  │ → currencySymbol │
+                             └────────────┘  └──────────────────┘
 
 ▸ renderCart · function · untested · src/cart.ts:14
 breaks: passes 1 argument; formatPrice now takes 2
@@ -34,12 +34,12 @@ uses formatPrice · used by CheckoutPage
 h: ←  j: ↓  k: ↑  l: →  n: next flagged  t: tree view  1: ask Claude  2: re-map  3: web page
 ```
 
-A diff shows what you changed and nothing of what it reaches. Rename a struct, add a parameter, or loosen a check, and code in files you never opened breaks, or quietly starts doing something else. Ripple shows you that code before you ship.
+A diff shows what you changed and nothing of what it reaches. Rename a struct, add a parameter, or loosen a check, and code in files you never opened breaks, or quietly starts doing something else. Ripple maps that code.
 
-- **It maps the diff, however it was made.** Ripple reads git, so a change counts whether Claude made it, a script did, or you did.
-- **It maps symbols, in any language.** Functions, types, fields, and constants. A Claude agent does the tracing with the tools the repository already has, so there is nothing to set up per language.
-- **It leaves your code and your conversation alone.** The mapper runs in the background with nothing to edit files with, and it is refused, not prompted, when a command would need your permission.
-- **It is a map you move through.** Select a node to light its edges and read why it is flagged.
+- **The diff is read from git**, so a change counts whether Claude made it, a script did, or you did.
+- **The map is of symbols**: functions, types, fields, and constants. A Claude agent does the tracing with the tools the repository already has, so no language needs setting up.
+- **The mapper works in the background**, apart from your conversation. It has no tool that edits files, and a command that would need your permission is refused, not put to you.
+- **One node of the map is selected**: its edges are lit, and the pane says why it is flagged.
 
 ## Installing
 
@@ -66,7 +66,7 @@ Mapping runs in the background, so you can keep working while it does. Run `/rip
 
 ### The Map
 
-The pane opens beside the transcript in a wide terminal and above the prompt in a narrow one. Dependents sit above the change and what the change uses sits below it. One node is selected: its box is double-framed, its edges are lit, and the lines under the map say what it is, where it is, why it is flagged, and what it is linked to.
+The pane opens beside the transcript where the terminal is wide enough for Claude Code to dock it, and above the prompt otherwise. Dependents sit above the change and what the change uses sits below it. One node is selected: its box is double-framed, its edges are lit, and the lines under the map say what it is, where it is, why it is flagged, and what it is linked to.
 
 | Key | What it does |
 | :- | :- |
@@ -74,7 +74,7 @@ The pane opens beside the transcript in a wide terminal and above the prompt in 
 | `n` | Go to the next flagged node. |
 | `t` | Switch between the graph and the tree. |
 | `1` | Ask Claude, in the conversation, about the selected node. It is asked to explain and to edit nothing. |
-| `2` | Map the same changes again. |
+| `2` | Map again: the same scope and focus, as the changes now stand. |
 | `3` | The same as `/ripple web`. |
 
 The keys work while the pane has the keyboard, which it asks for when you open it. `ctrl+x tab` moves the keyboard between the pane and the prompt, and typing anything else goes back to the prompt. The keys that start something are digits, so the first letter of a prompt never sets one off. A click on a box selects it, and once the map has been clicked the arrow keys move the selection too.
@@ -95,7 +95,7 @@ A layer too wide for the pane keeps the selected node, what it is linked to, and
 
 To open on the tree every time, set **Default view** to `tree` in `/config`, or run `/plugin configure ripple@claude-code-ripple`.
 
-The desktop app, the VS Code extension, and the mobile app draw the map as a still ring picture in place of the graph.
+The desktop app, the VS Code extension, and the mobile app draw the map as a still ring picture in place of the graph, with nothing to select: the two buttons under it map again and write the web page.
 
 ### What The Marks Mean
 
@@ -114,7 +114,7 @@ The line under the header says how far to trust a map: `via LSP` and `via type c
 
 ## How Mapping Works
 
-`/ripple` reads the changes from git and starts a mapper: a background Claude agent with three tools, `Read`, `Bash`, and `LSP`, and a fourth to report with. It is given the command that shows the diff, the files that changed, your focus if you gave one, and notes on the languages the change is written in. It names the symbols the diff touches, follows what depends on them outward, lists what they use, and judges each dependent. Then it reports once, and the report becomes the map.
+`/ripple` reads the changes from git and starts a mapper: a background Claude agent with three tools, `Read`, `Bash`, and `LSP`, and a fourth to report with. It is given the command that shows the diff, the files that changed, your focus if you gave one, and notes on the languages the change is written in. It names the symbols the diff touches, follows what depends on them outward, lists what they use, and judges each dependent. Its instructions stop it three steps out from the change among dependents, and one step among what the change uses. Then it reports once, and the report becomes the map.
 
 The mapper looks for dependents with the most precise method the repository allows:
 
@@ -122,7 +122,7 @@ The mapper looks for dependents with the most precise method the repository allo
 2. **The language's own checker**, such as `tsc --noEmit` or `cargo check`, when your permission rules already allow the command.
 3. **Text search**, with every hit read and judged.
 
-The mapper never raises a permission dialog. A command that would have asked is refused, and it falls back to the next method. To let it use a checker, allow that command in your permission rules, for example `Bash(cargo check:*)`.
+A mapper never raises a permission dialog. A command that would have asked is refused, and it falls back to the next method. To let it use a checker, allow that command in your permission rules, for example `Bash(cargo check:*)`.
 
 Ripple has notes for TypeScript and JavaScript, Python, Rust, and Go: where dependents hide in each, which checker to run, and where the tests are. Any other language is mapped by the same method without them.
 
@@ -133,10 +133,11 @@ Ripple has notes for TypeScript and JavaScript, Python, Rust, and Go: where depe
 ```
 claude --plugin-dir ./ripple                # load the mod from disk; it reloads on save
 claude plugin validate --strict ./ripple    # what the engine would refuse, before a session finds out
+claude plugin validate --strict .           # the marketplace manifest
 claude plugin test ./ripple                 # the tests, with no session and no model
 ```
 
-The first time Claude Code loads the mod from this folder it writes its own API types into `ripple/.claude-plugin/types/`. `ripple/tsconfig.json` includes them, so an editor or `tsc -p ripple` checks the mod against the engine it runs on.
+Each time Claude Code loads the mod from this folder it writes its own API types into `ripple/.claude-plugin/types/`. `ripple/tsconfig.json` includes them, so an editor or `tsc -p ripple` checks the mod against the engine it runs on.
 
 ## Security
 
@@ -144,11 +145,12 @@ A mod is code that runs inside Claude Code, unsandboxed, with your permissions. 
 
 What Ripple does with that access:
 
-- **Reads git.** It runs read-only git commands (`diff`, `ls-files`, `symbolic-ref`, `rev-parse`, `merge-base`) when you run `/ripple`, and after each of your turns while it holds a map, to tell when the changes have moved on.
-- **Starts one agent per mapping**, in the background, which reads your code. It can call `Read`, `Bash`, `LSP`, and the report tool, and any call that would have asked for your permission is refused.
+- **Reads git.** It runs read-only git commands (`diff`, `ls-files`, `hash-object`, `symbolic-ref`, `rev-parse`, `merge-base`) when you run `/ripple`, and at session start and after each of your turns while it holds a map, to tell when the changes have moved on.
+- **Starts one agent per mapping**, in the background, which reads your code. It can call `Read`, `Bash`, `LSP`, and the report tool. It has no `Edit` or `Write` tool, its instructions forbid changing anything, and any call that would have asked for your permission is refused. A shell command that your session runs without asking, because of your permission rules or a mode such as `bypassPermissions`, is not refused: there the instructions are all that keep the mapper from writing.
+- **Watches permission checks.** To refuse what a mapper would have asked for, a hook sees every permission check of the session. It changes the answer only for a mapper's, and only from "ask" to "deny".
 - **Stores** the last map of each project in the mod's own store, under your Claude Code configuration directory.
 - **Writes** one file, `.ripple/graph.html`, and only for `/ripple web`, which also runs your system's file opener (`open`, `xdg-open`, or `rundll32` on Windows).
-- **Submits a prompt** to your conversation only when you press `1`.
+- **Submits a prompt** to your conversation only when you press `1`. The prompt is marked as Ripple's, not as your own words, and quotes what the mapper wrote as the mapper's.
 
 It makes no network requests of its own.
 
@@ -158,7 +160,8 @@ It makes no network requests of its own.
 - A mapping is one agent run, which costs what any subagent costs. It runs only when you ask.
 - A map holds at most 60 symbols. Past that the mapper keeps the changed symbols, then what breaks, then what needs review, then the nearest dependents.
 - The graph draws the edges between neighboring layers. Any other link of a node is in the lines under the map when the node is selected.
-- Ripple needs git, and maps one repository at a time.
+- A name is drawn one cell a character, so a name written in characters two cells wide pushes its row out of line.
+- Ripple needs git and at least one commit, and maps one repository at a time.
 
 ## License
 

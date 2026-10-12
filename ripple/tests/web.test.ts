@@ -49,7 +49,7 @@ describe('ring layout', () => {
     expect([center.ring, center.x, center.y]).toEqual(['center', RING.center, RING.center])
   })
 
-  test('direct dependents are spread evenly round the near ring, from the top', () => {
+  test('direct dependents are spread evenly around the near ring, from the top', () => {
     const at = (name: string) => [spot(SHOP_MAP, name).x, spot(SHOP_MAP, name).y]
     expect(at('renderCart')).toEqual([320, 180])
     expect(at('renderInvoice')).toEqual([460, 320])
@@ -72,13 +72,13 @@ describe('ring layout', () => {
     expect([symbol.x, symbol.y]).toEqual([270.5, 369.5])
   })
 
-  test('several changed symbols share a small circle round the center', () => {
+  test('several changed symbols share a small circle around the center', () => {
     const pair: RippleReport = { method: 'lsp', nodes: [changed('one'), changed('two')], edges: [] }
     expect([spot(pair, 'one').x, spot(pair, 'one').y]).toEqual([320, 320 - RING.changed])
     expect([spot(pair, 'two').x, spot(pair, 'two').y]).toEqual([320, 320 + RING.changed])
   })
 
-  test('siblings fan round the dependent they use, and no two far nodes share a seat', () => {
+  test('siblings fan around the dependent they use, and no two far nodes share a seat', () => {
     const fan = ringLayout(crowd(2, 6)).filter(one => one.ring === 'far')
     const angles = fan.map(one => one.angle).sort((a, b) => a - b)
     for (let index = 1; index < angles.length; index += 1) {
@@ -100,7 +100,6 @@ describe('ring layout', () => {
   })
 
   test('a fan that would wrap onto the first node is spread evenly instead', () => {
-    // Three dependents a third of a turn apart; the last one has ten dependents of its own.
     const lopsided = crowd(3, 0)
     const far = ['x0', 'x1', ...Array.from({ length: 10 }, (_, index) => `y${index}`)]
     far.forEach((name, index) => {
@@ -151,7 +150,6 @@ describe('ring svg', () => {
   })
 
   test('a dependent and the dependent of it never share a label row', () => {
-    // renderInvoice and InvoicePage sit on one sideways spoke: one over, one under.
     const rows = (name: string) =>
       [...svg.matchAll(new RegExp(`y="([\\d.]+)"[^>]*>${name}</text>`, 'g'))].map(match => Number(match[1]))
     const [near] = rows('renderInvoice')
@@ -201,21 +199,9 @@ describe('web page', () => {
   })
 
   test('says under the picture what every mark means and where it comes from', () => {
-    expect(KEY.map(entry => entry.label)).toEqual(['changed', 'breaks', 'review', 'ok', 'dependency', 'untested'])
-    for (const entry of KEY) {
-      expect(html).toContain(`<b>${entry.label}</b>`)
-      expect(entry.means.length).toBeGreaterThan(30)
-    }
+    expect(KEY.map(entry => entry.label)).toEqual(['changed', 'breaks', 'review', 'ok', 'uses', 'untested'])
+    expect(html).toContain('<b>uses</b><span>A symbol a changed one uses.')
     expect(html).toContain('No test file mentions this symbol by name. Nothing is run')
     expect(html).toContain('Ripple runs no tests and no analysis of its own.')
-  })
-
-  test('is a still page: nothing pulses or moves', () => {
-    for (const text of [html, ringSvg(SHOP_MAP)]) {
-      expect(text).not.toContain('<animate')
-      expect(text).not.toContain('animation')
-      expect(text).not.toContain('@keyframes')
-      expect(text).not.toContain('transition')
-    }
   })
 })

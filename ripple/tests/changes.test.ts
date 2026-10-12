@@ -1,6 +1,15 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { HEAD, describeChanges, printOf, readChanges, readRequest } from '../hooks/changes'
+import {
+  HEAD,
+  UNTRACKED_COMMAND,
+  describeChanges,
+  diffCommand,
+  hashCommand,
+  printOf,
+  readChanges,
+  readRequest,
+} from '../hooks/changes'
 
 // Git's own output for one working tree: a binary file, a removed line that
 // reads like a header, a deleted file, a path with a space (git ends those
@@ -50,7 +59,7 @@ const DIFF = [
 
 const MAIN = { ref: '4f1c2aa', name: 'main' }
 
-const UNTRACKED = '.ripple/graph.html\nsrc/fresh.ts\nsrc/üni.ts\n'
+const UNTRACKED = 'src/fresh.ts\nsrc/üni.ts\n'
 
 describe('reading a diff', () => {
   const { files } = readChanges('uncommitted', HEAD, DIFF, UNTRACKED)
@@ -93,9 +102,46 @@ describe('reading a diff', () => {
     expect(named('src/my file.ts')?.hunks).toBe(1)
   })
 
-  test('a file git does not track is an added file, and what /ripple web wrote is not a change', () => {
+  test('a file git does not track is an added file', () => {
     expect(named('src/fresh.ts')).toEqual({ file: 'src/fresh.ts', status: 'added', hunks: 0 })
-    expect(named('.ripple/graph.html')).toBeUndefined()
+  })
+})
+
+describe('what git is asked', () => {
+  test('the diff is spelled so that no git configuration changes its shape', () => {
+    const asked = diffCommand('4f1c2aa')
+    expect(asked.slice(0, 5)).toEqual(['git', '-c', 'core.quotePath=false', 'diff', '4f1c2aa'])
+    for (const flag of ['--relative', '--unified=0', '--no-color', '--no-ext-diff', '--no-textconv']) {
+      expect(asked).toContain(flag)
+    }
+    expect(asked).toContain('--src-prefix=a/')
+    expect(asked).toContain('--dst-prefix=b/')
+  })
+
+  test('neither the diff nor the untracked listing is asked for what /ripple web writes', () => {
+    const paths = ['--', '.', ':(exclude).ripple']
+    expect(diffCommand('HEAD').slice(-3)).toEqual(paths)
+    expect(UNTRACKED_COMMAND.slice(-3)).toEqual(paths)
+  })
+
+  test('untracked files are hashed by name, each after the end of the options, and none means no command', () => {
+    expect(hashCommand('')).toBeUndefined()
+    expect(hashCommand('\n')).toBeUndefined()
+    expect(hashCommand('src/fresh.ts\n-rf\n"src/we ird.ts"\n')).toEqual([
+      'git',
+      'hash-object',
+      '--',
+      'src/fresh.ts',
+      '-rf',
+      'src/we ird.ts',
+    ])
+  })
+
+  test('past two hundred untracked files the rest go unhashed', () => {
+    const many = Array.from({ length: 205 }, (_, index) => `f${index}.ts`).join('\n')
+    const asked = hashCommand(many) ?? []
+    expect(asked).toHaveLength(3 + 200)
+    expect(asked.at(-1)).toBe('f199.ts')
   })
 })
 
@@ -113,9 +159,11 @@ describe('the print of a reading', () => {
     expect(printOf(edited)).not.toBe(printOf(DIFF))
   })
 
-  test('a new untracked file changes the print', () => {
+  test('a new untracked file changes the print, and so does an edit to one', () => {
     const before = readChanges('uncommitted', HEAD, DIFF, '')
-    expect(readChanges('uncommitted', HEAD, DIFF, 'notes.md\n').print).not.toBe(before.print)
+    const added = readChanges('uncommitted', HEAD, DIFF, 'notes.md\n', '3e757656\n')
+    expect(added.print).not.toBe(before.print)
+    expect(readChanges('uncommitted', HEAD, DIFF, 'notes.md\n', 'be761e03\n').print).not.toBe(added.print)
   })
 })
 

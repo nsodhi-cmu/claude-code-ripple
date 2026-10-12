@@ -8,6 +8,7 @@ import {
   UNTRACKED_COMMAND,
   describeChanges,
   diffCommand,
+  hashCommand,
   mergeBaseCommand,
   readChanges,
   readRequest,
@@ -40,19 +41,27 @@ import { MOVES, detailOf, drawView, modeIn, nextFlagged, planOf, selectedOf, ste
 import { graphHtml, ringSvg } from './web'
 
 const PANE = 'ripple'
+/** The columns the pane asks for when it is docked beside the transcript, and the fewest it draws in. */
+const PANE_COLUMNS = 76
+const MIN_COLUMNS = 24
+/** The ring picture's side on the surfaces that draw it, in pixels: the pane's width, within these. */
+const RING_PIXELS = { perColumn: 8, least: 300, most: 720 }
+/** How long a git command and the system's file opener may run, in milliseconds. */
+const GIT_TIMEOUT_MS = 20_000
+const OPENER_TIMEOUT_MS = 10_000
 /**
  * The keys that start something: a turn of the conversation, a mapper, a
- * browser. They are digits so that a prompt typed while the pane has the
- * keyboard does not set one off with its first letter.
+ * browser. They are digits, which the first letter of a typed prompt never is.
  */
 const ASK = '1'
 const REMAP = '2'
 const WEB = '3'
-/** The columns the pane asks for when it is docked beside the transcript. */
-const PANE_COLUMNS = 76
+
 const NOT_A_REPOSITORY = 'Ripple: this is not a git repository, so there are no changes to map.'
 const NO_DEFAULT_BRANCH =
   'Ripple: found no default branch to compare this one with (looked for origin/HEAD, main, and master). Run /ripple to map the uncommitted changes.'
+const GIT_FAILED =
+  'Ripple: git could not show the changes. A repository with no commits yet has nothing to compare them with.'
 
 const map = atom({ plugin: 'ripple', key: 'map' } as const, null)
 const mapping = atom({ plugin: 'ripple', key: 'mapping' } as const, null)
@@ -62,14 +71,18 @@ const view = atom({ plugin: 'ripple', key: 'view' } as const, { mode: null, sele
 let firstMode: RippleMode = 'graph'
 /** The view the pane last drew the map in: the tree, wherever the graph had no room. */
 let drawnMode: RippleMode = 'graph'
-
 /** Whether the changes have moved on since the map on hand was made, as last checked. */
 let isStale = false
+/** Whether a mapper is being started, between the check that none is at work and the record of the new one. */
+let isStarting = false
 
-/** The elements both views draw with; every surface's table has them. */
+/** The elements every surface's table has. */
 type Kit = Pick<Elements['terminal'], 'Box' | 'Text' | 'Button'>
 
 const describe = (error: unknown): string => (error instanceof Error ? error.message : String(error))
+
+const rootOf = async ($: EngineInterface): Promise<string> =>
+  (await $.session.root()).replace(/\\/g, '/').replace(/\/+$/, '')
 
 const storeKey = async ($: EngineInterface): Promise<string> => `map:${await $.session.root()}`
 
@@ -86,7 +99,7 @@ const persist = async ($: EngineInterface, value: RippleMap | null): Promise<voi
 /** A command's output under the session's root, or undefined when it failed. */
 const run = async ($: EngineInterface, argv: readonly string[]): Promise<string | undefined> => {
   try {
-    const ran = await $.process.run(argv, { cwd: await $.session.root(), timeoutMs: 20_000 })
+    const ran = await $.process.run(argv, { cwd: await $.session.root(), timeoutMs: GIT_TIMEOUT_MS })
     return ran.exitCode === 0 ? ran.stdout : undefined
   } catch {
     return undefined
@@ -105,14 +118,17 @@ const baseOf = async ($: EngineInterface, scope: RippleScope): Promise<Base | un
   return undefined
 }
 
-/** Reads a scope's changes from git, or says why there are none to read. */
+/** Reads a scope's changes from git, or says why they could not be read. */
 const readTree = async ($: EngineInterface, scope: RippleScope): Promise<Changes | string> => {
   if ((await $.session.repo()) === null) return NOT_A_REPOSITORY
   const base = await baseOf($, scope)
   if (base === undefined) return NO_DEFAULT_BRANCH
-  const diff = (await run($, diffCommand(base.ref))) ?? ''
-  const untracked = (await run($, UNTRACKED_COMMAND)) ?? ''
-  return readChanges(scope, base, diff, untracked)
+  const diff = await run($, diffCommand(base.ref))
+  const untracked = await run($, UNTRACKED_COMMAND)
+  if (diff === undefined || untracked === undefined) return GIT_FAILED
+  const hashing = hashCommand(untracked)
+  const hashes = hashing === undefined ? '' : ((await run($, hashing)) ?? '')
+  return readChanges(scope, base, diff, untracked, hashes)
 }
 
 const nothingToMap = (changes: Changes): string =>
@@ -121,7 +137,21 @@ const nothingToMap = (changes: Changes): string =>
     : 'Ripple: nothing to map. Git shows no uncommitted changes here. Change something, or run /ripple branch to map the whole branch.'
 
 const refreshStatus = async ($: EngineInterface): Promise<void> => {
-  $.ui.status(statusText(await read($, map), (await read($, mapping)) !== null))
+  $.ui.status(statusText(await read($, map), (await read($, mapping)) !== null, isStale))
+}
+
+/**
+ * Reads the changes of the map on hand again and notes whether they are
+ * still the ones it was made from. A reading that fails changes nothing.
+ */
+const checkStale = async ($: EngineInterface): Promise<void> => {
+  const held = await read($, map)
+  if (held === null) return
+  const changes = await readTree($, held.scope)
+  if (typeof changes === 'string' || (changes.print !== held.print) === isStale) return
+  isStale = !isStale
+  await refreshStatus($)
+  $.ui.invalidate('ui.render')
 }
 
 /**
@@ -144,13 +174,14 @@ const openPane = async ($: EngineInterface, isAsked: boolean): Promise<void> => 
   }
 }
 
-/** Whether the mapper Ripple started is still at work; one that ended without a word is forgotten. */
+/** Whether the mapper Ripple is waiting on is still at work; one that ended without a word is forgotten. */
 const isMapping = async ($: EngineInterface): Promise<boolean> => {
   const at = await read($, mapping)
   if (at === null) return false
   const agent = (await $.agent.list()).find(one => one.id === at.agentId)
   if (agent !== undefined && ['pending', 'running', 'waiting'].includes(agent.status)) return true
   await update($, mapping, () => null)
+  await refreshStatus($)
   return false
 }
 
@@ -175,34 +206,44 @@ const showMap = async (
   const changes = await readTree($, scope)
   if (typeof changes === 'string') return changes
   if (changes.files.length === 0) return nothingToMap(changes)
-  const held = await read($, map)
-  if (!isForced && held !== null && held.print === changes.print && held.focus === focus) {
-    isStale = false
-    return undefined
-  }
-  if (await isMapping($)) {
-    const at = await read($, mapping)
-    const isSame = at !== null && at.print === changes.print && at.focus === focus
+  const isBusy = await isMapping($)
+  const at = await read($, mapping)
+  if (isBusy && at !== null) {
+    const isSame = at.print === changes.print && at.focus === focus
     return isSame ? undefined : 'Ripple: still mapping what was asked before. Run this again once that map is in.'
   }
-  const spawned = await $.agent.spawn({
-    subagentType: MAPPER_TYPE,
-    description: `Map ${describeChanges(changes)}`,
-    prompt: taskPrompt(changes, focus),
-  })
-  if (spawned.agentId === undefined) {
-    return `Ripple: could not start the mapper (${spawned.deny ?? 'no agent started'}).`
+  const held = await read($, map)
+  if (!isForced && held !== null && held.print === changes.print && held.focus === focus) {
+    if (isStale) {
+      isStale = false
+      await refreshStatus($)
+    }
+    return undefined
   }
-  const { agentId } = spawned
-  await update($, mapping, () => ({
-    agentId,
-    scope,
-    base: changes.base.name,
-    focus,
-    print: changes.print,
-  }))
-  await refreshStatus($)
-  return undefined
+  if (isStarting) return undefined
+  isStarting = true
+  try {
+    const spawned = await $.agent.spawn({
+      subagentType: MAPPER_TYPE,
+      description: `Map ${describeChanges(changes)}`,
+      prompt: taskPrompt(changes, focus, await rootOf($)),
+    })
+    if (spawned.agentId === undefined) {
+      return `Ripple: could not start the mapper (${spawned.deny ?? 'no agent started'}).`
+    }
+    const { agentId } = spawned
+    await update($, mapping, () => ({
+      agentId,
+      scope,
+      base: changes.base.name,
+      focus,
+      print: changes.print,
+    }))
+    await refreshStatus($)
+    return undefined
+  } finally {
+    isStarting = false
+  }
 }
 
 const openInBrowser = async ($: EngineInterface, path: string): Promise<boolean> => {
@@ -215,7 +256,7 @@ const openInBrowser = async ($: EngineInterface, path: string): Promise<boolean>
       ]
   for (const argv of attempts) {
     try {
-      const ran = await $.process.run(argv, { timeoutMs: 10_000 })
+      const ran = await $.process.run(argv, { timeoutMs: OPENER_TIMEOUT_MS })
       if (ran.exitCode === 0) return true
     } catch {
       // Not on this machine: try the next opener.
@@ -228,8 +269,7 @@ const openInBrowser = async ($: EngineInterface, path: string): Promise<boolean>
 const writeWeb = async ($: EngineInterface): Promise<string> => {
   const held = await read($, map)
   if (held === null) return 'Ripple: no map to export yet. Run /ripple first.'
-  const root = (await $.session.root()).replace(/\\/g, '/').replace(/\/+$/, '')
-  const path = `${root}/.ripple/graph.html`
+  const path = `${await rootOf($)}/.ripple/graph.html`
   await $.fs.write(path, graphHtml(held))
   const isOpen = await openInBrowser($, path)
   return isOpen ? 'Ripple: opened .ripple/graph.html' : `Ripple: wrote ${path}; open it in a browser.`
@@ -240,13 +280,28 @@ const styleOf = (paint: Paint): TextProps => {
   return { ...(color === undefined ? {} : { color }), ...(paint === 'dim' ? { dimColor: true } : {}) }
 }
 
+const LEGEND_LABELS = LEGEND.map(mark => `${mark.glyph} ${mark.label}`)
+
 const legend = ({ Box, Text }: Kit): RenderElement => (
   <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
-    {LEGEND.map(mark => (
-      <Text {...styleOf(mark.paint)}>{`${mark.glyph} ${mark.label}`}</Text>
+    {LEGEND.map((mark, index) => (
+      <Text {...styleOf(mark.paint)}>{LEGEND_LABELS[index]}</Text>
     ))}
   </Box>
 )
+
+/** The pane's keys under a map with nodes, in the order they are drawn. */
+const keysOf = (drawn: RippleMode): Array<{ key: string; label: string; isDim: boolean }> => [
+  { key: 'h', label: '←', isDim: true },
+  { key: 'j', label: '↓', isDim: true },
+  { key: 'k', label: '↑', isDim: true },
+  { key: 'l', label: '→', isDim: true },
+  { key: 'n', label: 'next flagged', isDim: true },
+  { key: 't', label: drawn === 'tree' ? 'graph view' : 'tree view', isDim: true },
+  { key: ASK, label: 'ask Claude', isDim: false },
+  { key: REMAP, label: 're-map', isDim: false },
+  { key: WEB, label: 'web page', isDim: false },
+]
 
 /** What the person is looking at, the view's mode settled. */
 const readView = async ($: EngineInterface): Promise<{ mode: RippleMode; selected: string | null }> => {
@@ -260,7 +315,7 @@ const ask = async ($: EngineInterface): Promise<void> => {
   const node = held === null ? undefined : selectedOf(held, (await read($, view)).selected)
   if (held === null || node === undefined) return
   $.ui.toast(`Ripple: asked Claude about ${node.name}.`)
-  await $.prompt.submit({ text: askPrompt(node, held), asUser: true })
+  await $.prompt.submit({ text: askPrompt(node, held) })
 }
 
 /** Does what one key of the pane does: a Button's hotkey, or a key the map was handed. */
@@ -315,17 +370,15 @@ export const register: Register = (on, options) => {
         if (kept !== null) await update($, map, () => kept)
       }
       await refreshStatus($)
+      await checkStale($)
     } catch (error) {
       $.ui.log(`ripple: session start: ${describe(error)}`, { to: 'debug' })
     }
     return next(e)
   })
 
-  // The mapper is Ripple's to start, never the model's to pick.
   on('agent.offer', { agent: 'ripple:mapper' }, () => ({ isOffered: false })).catch(($, e, next) => next(e))
 
-  // A command that opens the pane answers nothing; one with nothing to show
-  // says why, since a command that only toasts looks dead.
   on('command.run', { command: 'ripple' }, async ($, e) => {
     let said: string | undefined
     try {
@@ -350,21 +403,17 @@ export const register: Register = (on, options) => {
     return said === undefined ? {} : { text: said }
   })
 
-  // The mapper never asks: what would have raised a permission dialog is
-  // refused instead, and it finds another way.
   on('tool.check', async ($, e, next) => {
     const verdict = await next(e)
     if (e.agentId === undefined || verdict.decision !== 'ask') return verdict
-    const at = await read($, mapping)
-    return at?.agentId === e.agentId ? { decision: 'deny', reason: NO_ASKING } : verdict
+    const agent = (await $.agent.list()).find(one => one.id === e.agentId)
+    return agent?.type === MAPPER_TYPE ? { decision: 'deny', reason: NO_ASKING } : verdict
   }).catch(($, e, next) => next(e))
 
-  // The report: only the mapper Ripple started may make it. It becomes the
-  // map of the changes that mapper was sent to read.
   on('tool.call', { tool: 'mcp__ripple__report' }, async ($, e) => {
     const at = await read($, mapping)
     if (at === null || e.agentId !== at.agentId) {
-      return { deny: 'Only the mapper Ripple starts reports a map. The person runs /ripple to start one.' }
+      return { deny: 'Only the mapper Ripple is waiting on reports a map. The person runs /ripple to start one.' }
     }
     const reported = readReport(e)
     if ('error' in reported) {
@@ -383,29 +432,18 @@ export const register: Register = (on, options) => {
     isStale = false
     await persist($, made)
     await refreshStatus($)
-    void openPane($, false)
+    await checkStale($)
+    await openPane($, false)
     return { result: reportReply(reported.report, reported.notes) }
   }).catch(() => ({ deny: 'Ripple failed while reading the report.' }))
 
-  // A mapper that ends with no report stops the wait. After the person's own
-  // turns, the changes are read again to say when they have left the map behind.
   on('turn.complete', async ($, e, next) => {
     const done = await next(e)
     try {
-      if (e.agentId !== undefined) {
-        const at = await read($, mapping)
-        if (at?.agentId === e.agentId) {
-          await stopMapping($, 'Ripple: the mapper ended without a map. Run /ripple to try again.')
-        }
-        return done
-      }
-      const held = await read($, map)
-      if (held === null) return done
-      const changes = await readTree($, held.scope)
-      const hasMoved = typeof changes === 'string' || changes.print !== held.print
-      if (hasMoved !== isStale) {
-        isStale = hasMoved
-        $.ui.invalidate('ui.render')
+      if (e.agentId === undefined) {
+        await checkStale($)
+      } else if ((await read($, mapping))?.agentId === e.agentId) {
+        await stopMapping($, 'Ripple: the mapper ended without a map. Run /ripple to try again.')
       }
     } catch (error) {
       $.ui.log(`ripple: turn end: ${describe(error)}`, { to: 'debug' })
@@ -413,7 +451,6 @@ export const register: Register = (on, options) => {
     return done
   })
 
-  // What the map posts: the node a click landed on, or a key pressed over it.
   on('ui.message', async ($, e, next) => {
     if (e.requestId !== PANE || typeof e.data !== 'object' || e.data === null) return next(e)
     const { select, key } = e.data as { select?: unknown; key?: unknown }
@@ -426,7 +463,7 @@ export const register: Register = (on, options) => {
     const held = await read($, map)
     const at = await read($, mapping)
     const { mode, selected } = await readView($)
-    const columns = Math.max(24, e.props.bodyColumns)
+    const columns = Math.max(MIN_COLUMNS, e.props.bodyColumns)
 
     const kit: Kit = $.ui.resolve(e)
     const { Box, Text, Button } = kit
@@ -444,20 +481,22 @@ export const register: Register = (on, options) => {
         {notice}
       </Text>
     )
-    const key = (hotkey: string, label: string, isDim = false): RenderElement => (
+    const button = (key: string, label: string, isDim = false): RenderElement => (
       <Button
-        key={hotkey}
+        key={key}
         label={label}
-        hotkey={hotkey}
+        hotkey={key}
         plain
         {...(isDim ? { dimColor: true } : {})}
-        onPress={() => void press($, hotkey)}
+        onPress={() => void press($, key)}
       />
     )
 
     if (e.surface !== 'terminal') {
       const { Svg } = $.ui.resolve(e)
-      const side = Math.round(Math.min(720, Math.max(300, columns * 8)))
+      const side = Math.round(
+        Math.min(RING_PIXELS.most, Math.max(RING_PIXELS.least, columns * RING_PIXELS.perColumn)),
+      )
       return (
         <Box flexDirection="column" gap={1}>
           <Box flexDirection="column">
@@ -472,8 +511,8 @@ export const register: Register = (on, options) => {
           {hasNodes && legend(kit)}
           {held !== null && (
             <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
-              {key(REMAP, 'Re-map')}
-              {key(WEB, 'Open in browser')}
+              {button(REMAP, 're-map')}
+              {button(WEB, 'web page')}
             </Box>
           )}
         </Box>
@@ -481,27 +520,32 @@ export const register: Register = (on, options) => {
     }
 
     const { Client, Link } = $.ui.resolve(e)
-    const node = hasNodes ? selectedOf(held, selected) : undefined
-    const detail = node === undefined || !hasNodes ? undefined : detailOf(held, node)
-    const root = (await $.session.root()).replace(/\\/g, '/').replace(/\/+$/, '')
     const plan = planOf(
       { columns, rows: e.props.scroll.bodyRows },
       {
         summary: held?.summary ?? '',
-        verdict: detail?.verdict?.text ?? '',
-        links: detail?.links ?? '',
         hasNotice: notice !== undefined,
+        legend: LEGEND_LABELS,
+        keys: keysOf(mode).map(one => one.label),
       },
     )
     const room = { columns, rows: plan.mapRows }
     const gap = plan.isCompact ? 0 : 1
     drawnMode = modeIn(mode, room)
+    const keys = keysOf(drawnMode).filter(one => one.key !== 't' || modeIn('graph', room) === 'graph')
+    const node = hasNodes ? selectedOf(held, selected) : undefined
+    const detail = node === undefined || !hasNodes ? undefined : detailOf(held, node)
+    const root = await rootOf($)
     return (
       <Box flexDirection="column">
         <Text bold wrap="truncate-end">
           {held === null ? 'Ripple' : headerText(held)}
         </Text>
-        {!plan.isCompact && held !== null && <Text dimColor>{originText(held)}</Text>}
+        {!plan.isCompact && held !== null && (
+          <Text dimColor wrap="truncate-end">
+            {originText(held)}
+          </Text>
+        )}
         {!plan.isCompact && held?.summary !== undefined && <Text wrap="wrap">{held.summary}</Text>}
         {noticeLine}
         {!plan.isCompact && hasNodes && legend(kit)}
@@ -517,29 +561,25 @@ export const register: Register = (on, options) => {
               <Text dimColor>{` · ${detail.facts} · `}</Text>
               <Link href={`file://${root}/${node.file}`} label={detail.where} />
             </Text>
-            {detail.verdict !== undefined && (
-              <Text wrap={plan.isCompact ? 'truncate-end' : 'wrap'} {...styleOf(detail.verdict.paint)}>
-                {detail.verdict.text}
-              </Text>
-            )}
-            {!plan.isCompact && detail.links !== '' && (
-              <Text wrap="wrap" dimColor>
-                {detail.links}
-              </Text>
+            <Box height={plan.detail.verdict} overflow="hidden">
+              {detail.verdict !== undefined && (
+                <Text wrap={plan.detail.verdict === 1 ? 'truncate-end' : 'wrap'} {...styleOf(detail.verdict.paint)}>
+                  {detail.verdict.text}
+                </Text>
+              )}
+            </Box>
+            {plan.detail.links > 0 && (
+              <Box height={plan.detail.links} overflow="hidden">
+                <Text wrap="truncate-end" dimColor>
+                  {detail.links}
+                </Text>
+              </Box>
             )}
           </Box>
         )}
-        {hasNodes && (
+        {held !== null && (
           <Box flexDirection="row" flexWrap="wrap" columnGap={2} marginTop={gap}>
-            {key('h', '←', true)}
-            {key('j', '↓', true)}
-            {key('k', '↑', true)}
-            {key('l', '→', true)}
-            {key('n', 'next flagged', true)}
-            {modeIn('graph', room) === 'graph' && key('t', drawnMode === 'tree' ? 'graph view' : 'tree view', true)}
-            {key(ASK, 'ask Claude')}
-            {key(REMAP, 're-map')}
-            {key(WEB, 'web page')}
+            {hasNodes ? keys.map(one => button(one.key, one.label, one.isDim)) : button(REMAP, 're-map')}
           </Box>
         )}
       </Box>

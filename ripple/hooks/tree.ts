@@ -1,9 +1,10 @@
 import type { RippleNode, RippleReport } from '../types'
-import { clip, locOf, markOf, note, windowOf } from './draw'
+import { locOf, markOf, note, windowOf, wordsOf } from './draw'
 import type { Drawing, Hit, Move, Room, Span } from './draw'
+import { clip } from './map'
 
 // The tree view: one row a node, each changed symbol with its dependents
-// hanging under it and then what it uses. Nothing here touches `$`.
+// hanging under it and then what it uses.
 
 /** The most characters of a name a row shows. */
 const NAME_CHARS = 32
@@ -20,7 +21,8 @@ export type TreeRow = {
 
 /**
  * The tree's rows, top to bottom. A node hangs under the first node, one
- * step nearer the change, that it is linked to; one linked to none is a root.
+ * step nearer the change, that it is linked to; one linked to none is a root,
+ * after the changed symbols and nearest the change first.
  */
 export function treeOf(report: RippleReport): TreeRow[] {
   const placed = new Set<string>()
@@ -50,52 +52,54 @@ export function treeOf(report: RippleReport): TreeRow[] {
     })
   }
   for (const node of report.nodes.filter(one => one.role === 'changed')) walk(node, null, '', '')
-  for (const node of report.nodes) if (!placed.has(node.id)) walk(node, null, '', '')
+  for (const node of [...report.nodes].sort((a, b) => a.depth - b.depth)) {
+    if (!placed.has(node.id)) walk(node, null, '', '')
+  }
   return rows
 }
 
-/** `signature changed`, `breaks · untested`: what a row says after where the node is. */
-function wordsOf(node: RippleNode): string {
-  const words: string[] = []
-  if (node.role === 'changed') {
-    words.push(node.change === 'signature' || node.change === 'behavior' ? `${node.change} changed` : (node.change ?? 'changed'))
+/**
+ * The run of rows that fits down `rows` around row `at`: as many as do,
+ * leaving a row for each line that counts a cut.
+ */
+function rowsIn(total: number, at: number, rows: number): [start: number, end: number] {
+  for (let count = Math.min(total, rows); count > 1; count -= 1) {
+    const [start, end] = windowOf(total, count, at, at)
+    if (count + (start > 0 ? 1 : 0) + (end < total ? 1 : 0) <= rows) return [start, end]
   }
-  if (node.risk !== 'ok') words.push(node.risk)
-  if (!node.isTested && node.role !== 'dependency') words.push('untested')
-  return words.join(' · ')
+  return windowOf(total, 1, at, at)
 }
 
 /** Draws the map as a tree in `room`, around the selected node. */
 export function drawTree(report: RippleReport, selected: string | null, room: Room): Drawing {
   const tree = treeOf(report)
-  const isCut = tree.length > room.rows
   const at = Math.max(
     0,
     tree.findIndex(row => row.node.id === selected),
   )
-  const [start, end] = isCut ? windowOf(tree.length, Math.max(1, room.rows - 2), at, at) : [0, tree.length]
+  const [start, end] = rowsIn(tree.length, at, room.rows)
   const headColumns = Math.max(0, ...tree.map(row => row.lead.length + 2 + Math.min(row.node.name.length, NAME_CHARS)))
   const whereColumns = Math.min(WHERE_CHARS, Math.max(0, ...tree.map(row => locOf(row.node).length)))
 
   const rows: Span[][] = []
   const hits: Hit[] = []
-  const above = tree[start - 1]
-  if (isCut) {
-    if (above !== undefined) hits.push({ id: above.node.id, x: 0, y: 0, width: room.columns, height: 1 })
-    rows.push(note(above === undefined ? '' : `↑ ${start} more above`))
+  const cut = (text: string, into: TreeRow): void => {
+    hits.push({ id: into.node.id, x: 0, y: rows.length, width: room.columns, height: 1 })
+    rows.push(note(text))
   }
+  const above = tree[start - 1]
+  if (above !== undefined) cut(`↑ ${start} more above`, above)
   for (const row of tree.slice(start, end)) {
     const { node } = row
     const mark = markOf(node)
     const name = clip(node.name, NAME_CHARS)
-    const isSelected = node.id === selected
-    const words = wordsOf(node)
+    const words = wordsOf(node).join(' · ')
     const spans: Span[] = [
       { text: row.lead, paint: 'dim' },
       {
         text: `${mark.glyph} ${name}`,
         paint: mark.paint,
-        ...(isSelected ? { isBold: true as const, isInverse: true as const } : {}),
+        ...(node.id === selected ? { isBold: true as const, isInverse: true as const } : {}),
       },
       { text: `${' '.repeat(headColumns - row.lead.length - 2 - name.length + 2)}${locOf(node)}`, paint: 'dim' },
     ]
@@ -107,10 +111,7 @@ export function drawTree(report: RippleReport, selected: string | null, room: Ro
     rows.push(spans)
   }
   const below = tree[end]
-  if (isCut) {
-    if (below !== undefined) hits.push({ id: below.node.id, x: 0, y: rows.length, width: room.columns, height: 1 })
-    rows.push(note(below === undefined ? '' : `↓ ${tree.length - end} more below`))
-  }
+  if (below !== undefined) cut(`↓ ${tree.length - end} more below`, below)
   return { rows, hits }
 }
 
