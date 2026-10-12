@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { describeChanges, printOf, readChanges, readRequest } from '../hooks/changes'
+import { HEAD, describeChanges, printOf, readChanges, readRequest } from '../hooks/changes'
 
 // Git's own output for one working tree: a binary file, a removed line that
 // reads like a header, a deleted file, a path with a space (git ends those
@@ -48,10 +48,12 @@ const DIFF = [
   '',
 ].join('\n')
 
+const MAIN = { ref: '4f1c2aa', name: 'main' }
+
 const UNTRACKED = '.ripple/graph.html\nsrc/fresh.ts\nsrc/üni.ts\n'
 
 describe('reading a diff', () => {
-  const { files } = readChanges('uncommitted', 'HEAD', DIFF, UNTRACKED)
+  const { files } = readChanges('uncommitted', HEAD, DIFF, UNTRACKED)
   const named = (file: string) => files.find(entry => entry.file === file)
 
   test('every file is one entry, in the order git lists them, untracked ones last', () => {
@@ -99,10 +101,10 @@ describe('reading a diff', () => {
 
 describe('the print of a reading', () => {
   test('the same diff under another scope is another print', () => {
-    const uncommitted = readChanges('uncommitted', 'HEAD', DIFF, '')
-    const branch = readChanges('branch', 'main', DIFF, '')
+    const uncommitted = readChanges('uncommitted', HEAD, DIFF, '')
+    const branch = readChanges('branch', MAIN, DIFF, '')
     expect(uncommitted.print).not.toBe(branch.print)
-    expect(readChanges('uncommitted', 'HEAD', DIFF, '').print).toBe(uncommitted.print)
+    expect(readChanges('uncommitted', HEAD, DIFF, '').print).toBe(uncommitted.print)
   })
 
   test('one changed character changes the print, though the length stays', () => {
@@ -112,8 +114,8 @@ describe('the print of a reading', () => {
   })
 
   test('a new untracked file changes the print', () => {
-    const before = readChanges('uncommitted', 'HEAD', DIFF, '')
-    expect(readChanges('uncommitted', 'HEAD', DIFF, 'notes.md\n').print).not.toBe(before.print)
+    const before = readChanges('uncommitted', HEAD, DIFF, '')
+    expect(readChanges('uncommitted', HEAD, DIFF, 'notes.md\n').print).not.toBe(before.print)
   })
 })
 
@@ -149,11 +151,11 @@ describe('what /ripple was asked', () => {
 
 describe('describing the changes', () => {
   test('a scope reads the way the person would say it', () => {
-    expect(describeChanges(readChanges('uncommitted', 'HEAD', DIFF, UNTRACKED))).toBe('8 uncommitted files')
-    expect(describeChanges(readChanges('branch', 'main', DIFF, ''))).toBe(
+    expect(describeChanges(readChanges('uncommitted', HEAD, DIFF, UNTRACKED))).toBe('8 uncommitted files')
+    expect(describeChanges(readChanges('branch', MAIN, DIFF, ''))).toBe(
       '6 files changed on this branch since main',
     )
     const one = 'diff --git a/a.ts b/a.ts\n--- a/a.ts\n+++ b/a.ts\n@@ -1 +1 @@\n-a\n+b\n'
-    expect(describeChanges(readChanges('uncommitted', 'HEAD', one, ''))).toBe('1 uncommitted file')
+    expect(describeChanges(readChanges('uncommitted', HEAD, one, ''))).toBe('1 uncommitted file')
   })
 })

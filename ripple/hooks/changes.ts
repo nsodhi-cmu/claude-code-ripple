@@ -1,11 +1,10 @@
+import type { RippleScope } from '../types'
+
 // The changes Ripple maps, as git reports them. Nothing here touches `$`:
 // register.tsx runs the commands these functions name and hands back the text.
 
-/** Which changes: the working tree against HEAD, or everything since the branch left the default one. */
-export type Scope = 'uncommitted' | 'branch'
-
 /** What `/ripple <args>` asks for. */
-export type Request = { verb: 'map'; scope: Scope; focus: string } | { verb: 'web' | 'reset' }
+export type Request = { verb: 'map'; scope: RippleScope; focus: string } | { verb: 'web' | 'reset' }
 
 /** `web` and `reset` stand alone, `branch` picks the scope, and any other words are what to focus on. */
 export function readRequest(args: string): Request {
@@ -19,9 +18,9 @@ export function readRequest(args: string): Request {
 
 const GIT = ['git', '-c', 'core.quotePath=false'] as const
 
-/** The working tree against `base`, one hunk per change and no context lines. */
-export function diffCommand(base: string): string[] {
-  return [...GIT, 'diff', base, '--relative', '--unified=0', '--no-color', '--no-ext-diff']
+/** The working tree against `ref`, one hunk per change and no context lines. */
+export function diffCommand(ref: string): string[] {
+  return [...GIT, 'diff', ref, '--relative', '--unified=0', '--no-color', '--no-ext-diff']
 }
 
 /** The files git does not track yet, which no diff shows. */
@@ -49,10 +48,14 @@ export type ChangedFile = {
   from?: string
 }
 
+/** What a scope's changes are against: `ref` as git is asked for it, `name` as the person would say it. */
+export type Base = { ref: string; name: string }
+
+export const HEAD: Base = { ref: 'HEAD', name: 'HEAD' }
+
 export type Changes = {
-  scope: Scope
-  /** What the diff is against, as the person would name it: `HEAD`, `main`. */
-  base: string
+  scope: RippleScope
+  base: Base
   files: ChangedFile[]
   /** Two readings with one print hold the same changes. */
   print: string
@@ -124,7 +127,7 @@ export function printOf(text: string): string {
 }
 
 /** The changes of a scope, from the text of its diff and the listing of untracked files. */
-export function readChanges(scope: Scope, base: string, diff: string, untracked: string): Changes {
+export function readChanges(scope: RippleScope, base: Base, diff: string, untracked: string): Changes {
   const files = [...diffFiles(diff), ...untrackedFiles(untracked)]
   return { scope, base, files, print: printOf(`${scope}\n${diff}\n${untracked}`) }
 }
@@ -134,6 +137,6 @@ export function describeChanges(changes: Changes): string {
   const count = changes.files.length
   const files = `file${count === 1 ? '' : 's'}`
   return changes.scope === 'branch'
-    ? `${count} ${files} changed on this branch since ${changes.base}`
+    ? `${count} ${files} changed on this branch since ${changes.base.name}`
     : `${count} uncommitted ${files}`
 }

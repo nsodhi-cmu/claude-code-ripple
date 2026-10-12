@@ -1,103 +1,59 @@
-import type { RippleMap } from '../types'
+import type { RippleMap, RippleNode } from '../types'
 
-/** A shop's map after `formatPrice` gained a currency parameter: four callers, two pages above them, two callees. */
+const node = (
+  name: string,
+  file: string,
+  line: number,
+  rest: Partial<RippleNode> = {},
+): RippleNode => ({
+  id: `${file}:${name}`,
+  name,
+  kind: 'function',
+  file,
+  line,
+  role: 'dependent',
+  depth: 1,
+  risk: 'ok',
+  tested: true,
+  ...rest,
+})
+
+/**
+ * A shop after `formatPrice` gained a currency parameter: four functions use
+ * it, two pages use two of those, and it uses two helpers itself.
+ */
 export const SHOP_MAP: RippleMap = {
   method: 'lsp',
+  summary: 'Two callers of formatPrice no longer compile, and receipts may show the wrong currency.',
+  scope: 'uncommitted',
+  base: 'HEAD',
+  focus: '',
+  print: '',
   nodes: [
-    {
-      id: 'src/price.ts:formatPrice',
-      name: 'formatPrice',
-      file: 'src/price.ts',
-      line: 1,
-      kind: 'changed',
+    node('formatPrice', 'src/price.ts', 1, {
+      role: 'changed',
       depth: 0,
       change: 'signature',
-      status: 'ok',
-      tested: true,
-    },
-    {
-      id: 'src/cart.ts:renderCart',
-      name: 'renderCart',
-      file: 'src/cart.ts',
-      line: 14,
-      kind: 'caller',
-      depth: 1,
-      status: 'needs-review',
+      reason: 'gained a required currency parameter',
+    }),
+    node('renderCart', 'src/cart.ts', 14, {
+      risk: 'breaks',
       tested: false,
       reason: 'passes 1 argument; formatPrice now takes 2',
-    },
-    {
-      id: 'src/invoice.ts:renderInvoice',
-      name: 'renderInvoice',
-      file: 'src/invoice.ts',
-      line: 11,
-      kind: 'caller',
-      depth: 1,
-      status: 'needs-review',
-      tested: true,
+    }),
+    node('renderInvoice', 'src/invoice.ts', 11, {
+      risk: 'breaks',
       reason: 'passes 1 argument; invoice.currency is not passed',
-    },
-    {
-      id: 'src/ui.ts:priceLabel',
-      name: 'priceLabel',
-      file: 'src/ui.ts',
-      line: 4,
-      kind: 'caller',
-      depth: 1,
-      status: 'ok',
-      tested: true,
-    },
-    {
-      id: 'src/email.ts:emailReceipt',
-      name: 'emailReceipt',
-      file: 'src/email.ts',
-      line: 6,
-      kind: 'caller',
-      depth: 1,
-      status: 'needs-review',
-      tested: true,
-      reason: 'passes 1 argument; receipt.currency is not passed',
-    },
-    {
-      id: 'src/pages/checkout.ts:CheckoutPage',
-      name: 'CheckoutPage',
-      file: 'src/pages/checkout.ts',
-      line: 5,
-      kind: 'caller',
-      depth: 2,
-      status: 'ok',
-      tested: true,
-    },
-    {
-      id: 'src/pages/invoice.ts:InvoicePage',
-      name: 'InvoicePage',
-      file: 'src/pages/invoice.ts',
-      line: 5,
-      kind: 'caller',
-      depth: 2,
-      status: 'ok',
-      tested: true,
-    },
-    {
-      id: 'src/price.ts:toFixed2',
-      name: 'toFixed2',
-      file: 'src/price.ts',
-      line: 5,
-      kind: 'callee',
-      depth: 1,
-      status: 'ok',
-      tested: true,
-    },
-    {
-      id: 'src/price.ts:currencySymbol',
-      name: 'currencySymbol',
-      file: 'src/price.ts',
-      line: 9,
-      kind: 'callee',
-      depth: 1,
-      status: 'ok',
-      tested: true,
-    },
+    }),
+    node('priceLabel', 'src/ui.ts', 4),
+    node('emailReceipt', 'src/email.ts', 6, {
+      risk: 'review',
+      reason: 'passes a hard-coded "USD"; receipts in other currencies show the wrong symbol',
+    }),
+    node('CheckoutPage', 'src/pages/checkout.ts', 5, { depth: 2 }),
+    node('InvoicePage', 'src/pages/invoice.ts', 5, { depth: 2 }),
+    node('toFixed2', 'src/price.ts', 9, { role: 'dependency' }),
+    node('currencySymbol', 'src/price.ts', 13, { role: 'dependency' }),
   ],
   edges: [
     { from: 'src/cart.ts:renderCart', to: 'src/price.ts:formatPrice' },
@@ -109,4 +65,12 @@ export const SHOP_MAP: RippleMap = {
     { from: 'src/price.ts:formatPrice', to: 'src/price.ts:toFixed2' },
     { from: 'src/price.ts:formatPrice', to: 'src/price.ts:currencySymbol' },
   ],
+}
+
+/** The shop's map as a mapper would report it: no depths, and no word of which changes it is of. */
+export const SHOP_REPORT = {
+  method: SHOP_MAP.method,
+  summary: SHOP_MAP.summary,
+  nodes: SHOP_MAP.nodes.map(({ depth: _depth, ...reported }) => reported),
+  edges: SHOP_MAP.edges,
 }
