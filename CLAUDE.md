@@ -44,7 +44,7 @@ The engine reads a hooks module's source before it loads it, and refuses what it
 - An event matcher, a `$.state` reference, an environment variable's name, and a `Client`'s `module` path are literals in the source.
 - A `Client` is the only element that receives pointer events and arrow keys, and it receives keys only after a click on it. A Button's `hotkey` works whenever the pane has the keyboard, but only on a Button the hooks module drew, not one inside a `Client`.
 - In the test kit, a plugin's `$.agent.spawn` reaches the test's `agent.spawn` hook as the Agent tool's call, and the kit reads the started agent's id off `result.agentId`.
-- The engine decides which shell commands run without a permission prompt by how they are spelled: `git diff --relative HEAD` does, and `git diff HEAD --relative` does not. A mapper is refused what would prompt, so a command its prompt names has to be one the engine lets through. `$.tool.check({ tool: 'Bash', input: { command } })` answers for any spelling, with nothing run.
+- The engine decides which shell commands run without a permission prompt by how they are spelled: `git diff --relative HEAD` does, and `git diff HEAD --relative` does not. A mapper is refused what would prompt, so a command its prompt names has to be one the engine lets through: `git show <ref>:./<path>` is another that is. `$.tool.check({ tool: 'Bash', input: { command } })` answers for any spelling, with nothing run.
 
 The API's types are the reference for everything else: `ripple/.claude-plugin/types/claude-code/index.d.ts`, once the mod has been loaded.
 
