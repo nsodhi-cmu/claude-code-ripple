@@ -1,13 +1,8 @@
 import type { RippleMap } from '../types'
 
-/**
- * The canned map `/ripple demo` shows: the examples/ts-shop call graph after
- * "add a currency parameter to formatPrice", at that project's real lines (a
- * caller's line is its first call). No model call is made for it.
- */
-export const DEMO_MAP: RippleMap = {
+/** A shop's map after `formatPrice` gained a currency parameter: four callers, two pages above them, two callees. */
+export const SHOP_MAP: RippleMap = {
   method: 'lsp',
-  isDemo: true,
   nodes: [
     {
       id: 'src/price.ts:formatPrice',

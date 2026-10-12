@@ -2,8 +2,8 @@ import { expect, mock, test } from 'claude-code/testing'
 import type { Engine } from 'claude-code/testing'
 import type { On, RenderPropsOf } from 'claude-code'
 
-import { DEMO_MAP } from './demo'
-import { MAPPING_MARKER, printOf } from './model'
+import { SHOP_MAP } from './fixture'
+import { MAPPING_MARKER, printOf } from '../hooks/model'
 
 // The whole loop through the engine. Ripple reads the working tree from git
 // and nothing else: /ripple asks Claude to map the uncommitted changes, the
@@ -23,8 +23,6 @@ const PANE: RenderPropsOf['Pane'] = {
   view: {},
 }
 
-/** The demo map as Claude would report it: no `isDemo`. */
-const REPORT = { method: DEMO_MAP.method, nodes: DEMO_MAP.nodes, edges: DEMO_MAP.edges }
 
 const fileDiff = (file: string, line: number, added: string): string =>
   [
@@ -233,7 +231,7 @@ test('the loop: /ripple maps the diff, Claude reports, a fix turns a caller gree
   await waiting.unmount()
 
   // Claude reports; the result tells it what to check.
-  const reported = await $.tool.call({ tool: 'mcp__ripple__report', ...REPORT })
+  const reported = await $.tool.call({ tool: 'mcp__ripple__report', ...SHOP_MAP })
   expect(String(reported.result)).toStartWith('Ripple map shown to the user: 1 changed, 6 callers, 3 need review.')
   expect(String(reported.result)).toContain('- renderCart (src/cart.ts:14): passes 1 argument; formatPrice now takes 2')
   expect(seen.status.at(-1)).toBe('ripple: 3 need review · /ripple to see the map')
@@ -281,7 +279,7 @@ test('/ripple on a diff that is already mapped shows that map and asks the model
   await start($)
   await ripple($)
   await clock.advance(SUBMIT_AFTER_MS)
-  await $.tool.call({ tool: 'mcp__ripple__report', ...REPORT })
+  await $.tool.call({ tool: 'mcp__ripple__report', ...SHOP_MAP })
   expect(seen.prompts).toHaveLength(1)
 
   expect(await ripple($)).toEqual({})
@@ -300,7 +298,7 @@ test('/ripple on a diff that is already mapped shows that map and asks the model
 test('the next session shows the kept map for the same diff without asking again', async ($, on) => {
   const { seen, clock } = world(on)
   seen.diff = PRICE_DIFF
-  seen.store.set(`map:${ROOT}`, { ...REPORT, print: printOf(`${PRICE_DIFF}\n`) })
+  seen.store.set(`map:${ROOT}`, { ...SHOP_MAP, print: printOf(`${PRICE_DIFF}\n`) })
   await start($)
   expect(seen.status.at(-1)).toBe('ripple: 3 need review · /ripple to see the map')
   expect(await ripple($)).toEqual({})
@@ -334,7 +332,7 @@ test('a Check button asks Claude about that caller; Re-map maps the same diff ag
   const { seen, clock } = world(on)
   seen.diff = PRICE_DIFF
   await start($)
-  await $.tool.call({ tool: 'mcp__ripple__report', ...REPORT })
+  await $.tool.call({ tool: 'mcp__ripple__report', ...SHOP_MAP })
   const ui = await mountPane($)
 
   await ui.press({ key: 'check-2' })
@@ -404,15 +402,13 @@ test('a report that cannot be read is refused, and Claude is told why', async ($
   expect(JSON.stringify(refused)).toContain('Ripple could not read the map: `nodes` must be an array.')
 })
 
-test('/ripple demo draws the canned map on every surface, with no model call', async ($, on) => {
-  const { seen, clock } = world(on)
+test('a reported map is drawn on every surface: a tree in the terminal, rings elsewhere', async ($, on) => {
+  const { seen } = world(on)
+  seen.diff = PRICE_DIFF
   await start($)
-  expect(await ripple($, 'demo')).toEqual({})
-  await clock.settle()
-  expect(seen.prompts).toEqual([])
+  await $.tool.call({ tool: 'mcp__ripple__report', ...SHOP_MAP })
   expect(seen.opened).toEqual(['ripple'])
-  expect(seen.store.has(`map:${ROOT}`)).toBe(false)
-  const header = 'Ripple · 1 change → 6 callers · 3 need review · via LSP · demo'
+  const header = 'Ripple · 1 change → 6 callers · 3 need review · via LSP'
 
   for (const columns of [100, 48]) {
     const tree = await $.ui.mount({
@@ -446,10 +442,11 @@ test('/ripple web writes the page and opens it', async ($, on) => {
   expect((await ripple($, 'web')).text).toContain('no map to export yet')
   expect(seen.files.size).toBe(0)
 
-  await ripple($, 'demo')
+  await $.tool.call({ tool: 'mcp__ripple__report', ...SHOP_MAP })
   expect(await ripple($, ' WEB ')).toEqual({ text: 'Ripple: opened .ripple/graph.html' })
-  expect([...seen.files.keys()]).toEqual([`${ROOT}/.ripple/graph.html`])
-  expect(seen.files.get(`${ROOT}/.ripple/graph.html`)).toStartWith('<!doctype html>')
+  const [[path, page] = []] = [...seen.files]
+  expect(path).toEndWith('/repo/shop/.ripple/graph.html')
+  expect(page).toStartWith('<!doctype html>')
   expect(seen.ran).toEqual([['rundll32', 'url.dll,FileProtocolHandler', 'C:\\repo\\shop\\.ripple\\graph.html']])
 })
 
@@ -457,7 +454,7 @@ test('/ripple reset clears the map and the pane; other words print the usage', a
   const { seen } = world(on)
   seen.diff = PRICE_DIFF
   await start($)
-  await $.tool.call({ tool: 'mcp__ripple__report', ...REPORT })
+  await $.tool.call({ tool: 'mcp__ripple__report', ...SHOP_MAP })
   expect(await ripple($, 'reset')).toEqual({ text: 'Ripple: cleared the map.' })
   expect(seen.status.at(-1)).toBe('ripple: uncommitted changes in 1 file · /ripple to map')
   expect(seen.closed).toEqual(['ripple'])

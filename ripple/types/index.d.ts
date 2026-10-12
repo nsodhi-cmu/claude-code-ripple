@@ -28,8 +28,6 @@ export type RippleMap = {
   method: 'lsp' | 'tooling' | 'grep'
   nodes: RippleNode[]
   edges: RippleEdge[]
-  /** Set on the canned `/ripple demo` map, which is never persisted. */
-  isDemo?: boolean
   /** The print of the uncommitted diff this map was made from; the same diff needs no new map. */
   print?: string
 }

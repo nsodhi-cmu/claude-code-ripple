@@ -246,7 +246,6 @@ export function headerText(map: RippleMap): string {
   if (counts.review > 0) parts.push(`${counts.review} need${counts.review === 1 ? 's' : ''} review`)
   else parts.push(counts.updated > 0 ? 'all reviewed' : 'nothing to review')
   parts.push(`via ${METHOD_LABEL[map.method]}`)
-  if (map.isDemo === true) parts.push('demo')
   return parts.join(' · ')
 }
 
@@ -258,7 +257,7 @@ export function headerText(map: RippleMap): string {
 export function statusText(map: RippleMap | null, mapping: boolean, unmapped: number): string | undefined {
   if (mapping) return 'ripple: mapping…'
   const parts: string[] = []
-  const review = map === null || map.isDemo === true ? 0 : countsOf(map).review
+  const review = map === null ? 0 : countsOf(map).review
   if (review > 0) parts.push(`${review} need${review === 1 ? 's' : ''} review`)
   if (unmapped > 0) parts.push(`uncommitted changes in ${plural(unmapped, 'file')} · /ripple to map`)
   else if (review > 0) parts.push('/ripple to see the map')

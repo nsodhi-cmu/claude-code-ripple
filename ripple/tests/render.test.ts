@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import type { RippleMap, RippleNode } from '../types'
-import { DEMO_MAP } from './demo'
+import { SHOP_MAP } from './fixture'
 import {
   KEY,
   RING,
@@ -13,7 +13,7 @@ import {
   ringLayout,
   ringSvg,
   treeRows,
-} from './render'
+} from '../hooks/render'
 
 const count = (haystack: string, needle: string): number => haystack.split(needle).length - 1
 
@@ -52,7 +52,7 @@ const crowd = (near: number, far: number): RippleMap => {
 
 describe('tree view', () => {
   test('callers hang under what they call, callees on a last line', () => {
-    const rows = treeRows(DEMO_MAP)
+    const rows = treeRows(SHOP_MAP)
     expect(rows.map(row => `${row.lead}${row.glyph} ${row.name}`.trimEnd())).toEqual([
       '◉ formatPrice',
       '├─ ● renderCart',
@@ -69,7 +69,7 @@ describe('tree view', () => {
   })
 
   test('wide: one line a node, in three aligned columns', () => {
-    const lines = layoutTree(treeRows(DEMO_MAP), 140).map(lineText)
+    const lines = layoutTree(treeRows(SHOP_MAP), 140).map(lineText)
     expect(lines).toHaveLength(8)
     expect(lines[0]).toMatch(/^◉ formatPrice\s+src\/price\.ts:1\s+signature changed$/)
     expect(lines[1]).toMatch(
@@ -84,7 +84,7 @@ describe('tree view', () => {
   })
 
   test('wide: a reason too long for its column wraps under itself', () => {
-    const lines = layoutTree(treeRows(DEMO_MAP), WIDE_COLUMNS).map(lineText)
+    const lines = layoutTree(treeRows(SHOP_MAP), WIDE_COLUMNS).map(lineText)
     expect(lines).toHaveLength(11)
     expect(lines[1]).toMatch(/^├─ ● renderCart\s+src\/cart\.ts:14\s+NEEDS REVIEW · untested · passes 1$/)
     expect(lines[2]).toMatch(/^│  │\s+argument; formatPrice now takes 2$/)
@@ -93,7 +93,7 @@ describe('tree view', () => {
   })
 
   test('narrow: the note sits by the name, the location and reason under it', () => {
-    const lines = layoutTree(treeRows(DEMO_MAP), 48).map(lineText)
+    const lines = layoutTree(treeRows(SHOP_MAP), 48).map(lineText)
     expect(lines).toEqual([
       '◉ formatPrice  signature changed',
       '│ src/price.ts:1',
@@ -115,7 +115,7 @@ describe('tree view', () => {
   })
 
   test('narrower still: a location with no room beside the name goes under it', () => {
-    const lines = layoutTree(treeRows(DEMO_MAP), 30).map(lineText)
+    const lines = layoutTree(treeRows(SHOP_MAP), 30).map(lineText)
     expect(lines.slice(5, 8)).toEqual([
       '│  │ takes 2',
       '│  └─ ○ CheckoutPage',
@@ -125,8 +125,8 @@ describe('tree view', () => {
 
   test('an updated caller reads as updated and loses its emphasis', () => {
     const fixed: RippleMap = {
-      ...DEMO_MAP,
-      nodes: DEMO_MAP.nodes.map(node =>
+      ...SHOP_MAP,
+      nodes: SHOP_MAP.nodes.map(node =>
         node.name === 'renderCart' ? { ...node, status: 'updated' as const } : node,
       ),
     }
@@ -144,12 +144,12 @@ describe('tree view', () => {
 
 describe('ring layout', () => {
   test('one changed function sits at the center', () => {
-    const center = spot(DEMO_MAP, 'formatPrice')
+    const center = spot(SHOP_MAP, 'formatPrice')
     expect([center.ring, center.x, center.y]).toEqual(['center', RING.center, RING.center])
   })
 
   test('direct callers are spread evenly round the near ring, from the top', () => {
-    const at = (name: string) => [spot(DEMO_MAP, name).x, spot(DEMO_MAP, name).y]
+    const at = (name: string) => [spot(SHOP_MAP, name).x, spot(SHOP_MAP, name).y]
     expect(at('renderCart')).toEqual([320, 180])
     expect(at('renderInvoice')).toEqual([460, 320])
     expect(at('priceLabel')).toEqual([320, 460])
@@ -157,16 +157,16 @@ describe('ring layout', () => {
   })
 
   test('a caller of a caller sits straight out from the caller it calls', () => {
-    const checkout = spot(DEMO_MAP, 'CheckoutPage')
-    const invoice = spot(DEMO_MAP, 'InvoicePage')
+    const checkout = spot(SHOP_MAP, 'CheckoutPage')
+    const invoice = spot(SHOP_MAP, 'InvoicePage')
     expect([checkout.ring, checkout.x, checkout.y]).toEqual(['far', 320, 90])
     expect([invoice.x, invoice.y]).toEqual([550, 320])
-    expect(checkout.angle).toBe(spot(DEMO_MAP, 'renderCart').angle)
+    expect(checkout.angle).toBe(spot(SHOP_MAP, 'renderCart').angle)
   })
 
   test('callees sit on the inner ring, between the callers', () => {
-    const fixed = spot(DEMO_MAP, 'toFixed2')
-    const symbol = spot(DEMO_MAP, 'currencySymbol')
+    const fixed = spot(SHOP_MAP, 'toFixed2')
+    const symbol = spot(SHOP_MAP, 'currencySymbol')
     expect([fixed.ring, fixed.x, fixed.y]).toEqual(['callees', 369.5, 270.5])
     expect([symbol.x, symbol.y]).toEqual([270.5, 369.5])
   })
@@ -226,7 +226,7 @@ describe('ring layout', () => {
 })
 
 describe('ring svg', () => {
-  const svg = ringSvg(DEMO_MAP)
+  const svg = ringSvg(SHOP_MAP)
 
   test('is one svg document, far under the Svg element limit', () => {
     expect(svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 640 640"')).toBe(true)
@@ -238,8 +238,8 @@ describe('ring svg', () => {
   })
 
   test('draws a dot and a tooltip for every node, an edge for every call', () => {
-    expect(count(svg, '<g class="n">')).toBe(DEMO_MAP.nodes.length)
-    expect(count(svg, '<line ')).toBe(DEMO_MAP.edges.length)
+    expect(count(svg, '<g class="n">')).toBe(SHOP_MAP.nodes.length)
+    expect(count(svg, '<line ')).toBe(SHOP_MAP.edges.length)
     expect(svg).toContain('<title>renderCart · src/cart.ts:14\nneeds review · untested\npasses 1 argument; formatPrice now takes 2</title>')
     expect(svg).toContain('>src/pages/checkout.ts:5</text>')
   })
@@ -249,8 +249,8 @@ describe('ring svg', () => {
     expect(count(svg, 'stroke-dasharray="3 2.4"')).toBe(1)
     expect(count(svg, 'fill="#22c55e"')).toBe(0)
     const fixed = ringSvg({
-      ...DEMO_MAP,
-      nodes: DEMO_MAP.nodes.map(node =>
+      ...SHOP_MAP,
+      nodes: SHOP_MAP.nodes.map(node =>
         node.name === 'renderCart' ? { ...node, status: 'updated' as const } : node,
       ),
     })
@@ -299,11 +299,11 @@ describe('ring svg', () => {
 })
 
 describe('web page', () => {
-  const html = graphHtml(DEMO_MAP)
+  const html = graphHtml(SHOP_MAP)
 
   test('holds the ring view and what the hover script reads', () => {
     expect(html.startsWith('<!doctype html>')).toBe(true)
-    expect(html).toContain('<h1>Ripple · 1 change → 6 callers · 3 need review · via LSP · demo</h1>')
+    expect(html).toContain('<h1>Ripple · 1 change → 6 callers · 3 need review · via LSP</h1>')
     expect(html).toContain('data-name="renderCart" data-loc="src/cart.ts:14" data-status="needs review · untested"')
     expect(count(html, '<script>')).toBe(1)
     expect(html).toContain("node.addEventListener('mousemove'")
@@ -321,7 +321,7 @@ describe('web page', () => {
   })
 
   test('is a still page: nothing pulses or moves', () => {
-    for (const text of [html, ringSvg(DEMO_MAP)]) {
+    for (const text of [html, ringSvg(SHOP_MAP)]) {
       expect(text).not.toContain('<animate')
       expect(text).not.toContain('animation')
       expect(text).not.toContain('@keyframes')

@@ -33,7 +33,6 @@ Change something (or ask Claude to), then run `/ripple`.
 | Command | What it does |
 | :- | :- |
 | `/ripple` | Shows the map of your uncommitted changes. If this diff is not mapped yet, it asks Claude to map it first. |
-| `/ripple demo` | Shows a canned map. No model call, works offline. |
 | `/ripple web` | Writes `.ripple/graph.html` (the ring view) and opens it in a browser. |
 | `/ripple reset` | Clears the map. |
 
@@ -106,8 +105,7 @@ ripple/
   hooks/register.tsx              the hooks: reading git, /ripple, the report tool, the pane
   hooks/model.ts                  the map: reading a diff and a report, the prompts, which change touches which caller
   hooks/render.ts                 the tree view and the SVG ring view
-  hooks/demo.ts                   the canned map
-  hooks/*.test.ts                 unit tests, and the whole loop driven through the engine
+  tests/                          unit tests, and the whole loop driven through the engine
   types/index.d.ts                the map's types and the mod's session state
 ```
 

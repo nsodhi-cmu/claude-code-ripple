@@ -2,7 +2,6 @@ import { atom, read, update } from 'claude-code'
 import type { Elements, EngineInterface, Register, RenderElement } from 'claude-code'
 
 import type { RippleEdit, RippleMap, RippleNode } from '../types'
-import { DEMO_MAP } from './demo'
 import {
   MAPPING_MARKER,
   REPORT_DESCRIPTION,
@@ -33,7 +32,7 @@ import type { Segment, TreeLine } from './render'
 // a `sed` in the shell, your own typing), and `git diff HEAD` has them all.
 
 const PANE = 'ripple'
-const USAGE = 'Ripple: /ripple maps your uncommitted changes · /ripple demo · web · reset'
+const USAGE = 'Ripple: /ripple maps your uncommitted changes · /ripple web · reset'
 const NO_CHANGES =
   'Ripple: nothing to map. Git shows no uncommitted changes here. Change something (or ask Claude to), then run /ripple.'
 /** When the mapping prompt is tried after it was asked for, in milliseconds. */
@@ -65,11 +64,11 @@ const describe = (error: unknown): string => (error instanceof Error ? error.mes
 const storeKey = async ($: EngineInterface): Promise<string> =>
   `map:${slash(await $.session.root())}`
 
-/** Keeps the last real map across sessions; the canned demo map is never kept. */
+/** Keeps the last map across sessions. */
 const persist = async ($: EngineInterface, value: RippleMap | null): Promise<void> => {
   try {
     if (value === null) await $.store.delete(await storeKey($))
-    else if (value.isDemo !== true) await $.store.set(await storeKey($), value)
+    else await $.store.set(await storeKey($), value)
   } catch (error) {
     $.ui.log(`ripple: could not save the map: ${describe(error)}`, { to: 'debug' })
   }
@@ -187,7 +186,7 @@ const showMap = async ($: EngineInterface, isForced: boolean): Promise<string | 
  */
 const markFixes = async ($: EngineInterface): Promise<void> => {
   const held = await read($, map)
-  if (held === null || held.isDemo === true || mappedHunks === undefined) return
+  if (held === null || mappedHunks === undefined) return
   const known = mappedHunks
   const later = tree.hunks.filter(hunk => !known.has(hunkKey(hunk)))
   if (later.length === 0) return
@@ -223,7 +222,7 @@ const openInBrowser = async ($: EngineInterface, path: string): Promise<boolean>
 /** Writes and opens the web page; resolves to what happened, for the caller to say. */
 const writeWeb = async ($: EngineInterface): Promise<string> => {
   const held = await read($, map)
-  if (held === null) return 'Ripple: no map to export yet. Run /ripple first, or /ripple demo.'
+  if (held === null) return 'Ripple: no map to export yet. Run /ripple first.'
   const path = `${slash(await $.session.root()).replace(/\/+$/, '')}/.ripple/graph.html`
   await $.fs.write(path, graphHtml(held))
   const isOpen = await openInBrowser($, path)
@@ -314,7 +313,7 @@ export const register: Register = on => {
       await $.command.register({
         name: 'ripple',
         description: 'Map what your uncommitted changes reach',
-        argumentHint: '[demo|web|reset]',
+        argumentHint: '[web|reset]',
       })
     } catch (error) {
       $.ui.log(`ripple: could not register /ripple: ${describe(error)}`, { to: 'debug' })
@@ -331,12 +330,6 @@ export const register: Register = on => {
       if (verb === '') {
         said = await showMap($, false)
         if (said === undefined) await openPane($)
-      } else if (verb === 'demo') {
-        await update($, mapping, () => false)
-        await update($, map, () => DEMO_MAP)
-        mappedHunks = undefined
-        await refreshStatus($)
-        await openPane($)
       } else if (verb === 'reset') {
         await update($, map, () => null)
         await update($, mapping, () => false)
@@ -425,7 +418,7 @@ export const register: Register = on => {
     const held = await read($, map)
     const isMapping = await read($, mapping)
     const columns = Math.max(24, e.props.bodyColumns)
-    const isStale = held !== null && held.isDemo !== true && unmappedFiles(held) > 0
+    const isStale = held !== null && unmappedFiles(held) > 0
 
     const run = (work: Promise<void>): void => {
       void work.catch((error: unknown) => $.ui.toast(`Ripple: ${describe(error)}`))

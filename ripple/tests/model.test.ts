@@ -1,7 +1,7 @@
 import { describe, expect, test } from 'claude-code/testing'
 
 import type { RippleEdit, RippleMap } from '../types'
-import { DEMO_MAP } from './demo'
+import { SHOP_MAP } from './fixture'
 import {
   MAPPING_MARKER,
   MAX_NODES,
@@ -22,11 +22,11 @@ import {
   statusText,
   touchOf,
   touches,
-} from './model'
+} from '../hooks/model'
 
 const node = (id: string) => {
-  const found = DEMO_MAP.nodes.find(one => one.id === id)
-  if (found === undefined) throw new Error(`no demo node ${id}`)
+  const found = SHOP_MAP.nodes.find(one => one.id === id)
+  if (found === undefined) throw new Error(`no node ${id}`)
   return found
 }
 
@@ -36,7 +36,6 @@ const cart = node('src/cart.ts:renderCart')
 /** One hunk of a diff: `snippet` added at `line` of `file`. */
 const hunk = (file: string, line: number, snippet: string): RippleEdit => ({ file, line, snippet, at: 1 })
 
-const REPORT = { method: DEMO_MAP.method, nodes: DEMO_MAP.nodes, edges: DEMO_MAP.edges }
 
 describe('paths', () => {
   test('two spellings of one file match on a path boundary', () => {
@@ -123,11 +122,11 @@ describe('turning callers green', () => {
 
   test('only needs-review nodes turn, and the rest of the map is kept', () => {
     const touch = touchOf(hunk('src/cart.ts', 14, 'formatPrice(total, cart.currency)'))
-    const { map, updated } = markUpdated(DEMO_MAP, touch)
+    const { map, updated } = markUpdated(SHOP_MAP, touch)
     expect(updated.map(one => one.name)).toEqual(['renderCart'])
     expect(countsOf(map).review).toBe(2)
     expect(countsOf(map).updated).toBe(1)
-    expect(map.edges).toEqual(DEMO_MAP.edges)
+    expect(map.edges).toEqual(SHOP_MAP.edges)
 
     const again = markUpdated(map, touch)
     expect(again.updated).toEqual([])
@@ -137,19 +136,17 @@ describe('turning callers green', () => {
 
 describe('what the person reads', () => {
   test('the header counts changes, callers and reviews', () => {
-    expect(headerText(DEMO_MAP)).toBe('Ripple · 1 change → 6 callers · 3 need review · via LSP · demo')
+    expect(headerText(SHOP_MAP)).toBe('Ripple · 1 change → 6 callers · 3 need review · via LSP')
     expect(headerText({ method: 'grep', nodes: [], edges: [] })).toBe('Ripple · no function changes found')
   })
 
   test('the status line follows the uncommitted changes, mapping and reviews', () => {
-    const live: RippleMap = { ...DEMO_MAP, isDemo: false }
     expect(statusText(null, false, 0)).toBe(undefined)
     expect(statusText(null, false, 72)).toBe('ripple: uncommitted changes in 72 files · /ripple to map')
     expect(statusText(null, false, 1)).toBe('ripple: uncommitted changes in 1 file · /ripple to map')
     expect(statusText(null, true, 72)).toBe('ripple: mapping…')
-    expect(statusText(live, false, 0)).toBe('ripple: 3 need review · /ripple to see the map')
-    expect(statusText(live, false, 2)).toBe('ripple: 3 need review · uncommitted changes in 2 files · /ripple to map')
-    expect(statusText(DEMO_MAP, false, 0)).toBe(undefined)
+    expect(statusText(SHOP_MAP, false, 0)).toBe('ripple: 3 need review · /ripple to see the map')
+    expect(statusText(SHOP_MAP, false, 2)).toBe('ripple: 3 need review · uncommitted changes in 2 files · /ripple to map')
   })
 })
 
@@ -181,7 +178,7 @@ describe('what Claude reads', () => {
   })
 
   test('the report result lists what needs review and what to do', () => {
-    const lines = reportText(DEMO_MAP).split('\n')
+    const lines = reportText(SHOP_MAP).split('\n')
     expect(lines[0]).toBe('Ripple map shown to the user: 1 changed, 6 callers, 3 need review.')
     expect(lines[1]).toBe('Needs review:')
     expect(lines[2]).toBe('- renderCart (src/cart.ts:14): passes 1 argument; formatPrice now takes 2')
@@ -191,15 +188,15 @@ describe('what Claude reads', () => {
 
   test('a map with nothing to review says so', () => {
     const calm: RippleMap = {
-      ...DEMO_MAP,
-      nodes: DEMO_MAP.nodes.map(one => ({ ...one, status: 'ok' as const })),
+      ...SHOP_MAP,
+      nodes: SHOP_MAP.nodes.map(one => ({ ...one, status: 'ok' as const })),
     }
     expect(reportText(calm)).toContain('Nothing needs review.')
     expect(reportText({ method: 'lsp', nodes: [], edges: [] })).toContain('touched no function')
   })
 
   test('a Check button asks about one caller', () => {
-    expect(checkPrompt(cart, DEMO_MAP)).toBe(
+    expect(checkPrompt(cart, SHOP_MAP)).toBe(
       'Check renderCart at src/cart.ts:14 against the change to formatPrice; fix it if needed. Ripple flagged it: passes 1 argument; formatPrice now takes 2',
     )
   })
@@ -207,12 +204,11 @@ describe('what Claude reads', () => {
 
 describe('reading a reported map', () => {
   test('a clean map comes through whole', () => {
-    const read = sanitizeMap(REPORT)
+    const read = sanitizeMap(SHOP_MAP)
     if ('error' in read) throw new Error(read.error)
     expect(read.notes).toEqual([])
-    expect(read.map.nodes).toEqual(DEMO_MAP.nodes)
-    expect(read.map.edges).toEqual(DEMO_MAP.edges)
-    expect(read.map.isDemo).toBe(undefined)
+    expect(read.map.nodes).toEqual(SHOP_MAP.nodes)
+    expect(read.map.edges).toEqual(SHOP_MAP.edges)
   })
 
   test('repeated ids and edges that name no node are dropped, not fatal', () => {
@@ -286,8 +282,8 @@ describe('reading a reported map', () => {
   })
 
   test('a kept map comes back with the print of the diff it was made from', () => {
-    expect(readStored({ ...REPORT, print: '12:ab' })).toEqual({ ...REPORT, print: '12:ab' })
-    expect(readStored(REPORT)).toEqual(REPORT)
+    expect(readStored({ ...SHOP_MAP, print: '12:ab' })).toEqual({ ...SHOP_MAP, print: '12:ab' })
+    expect(readStored(SHOP_MAP)).toEqual(SHOP_MAP)
     expect(readStored(undefined)).toBe(null)
     expect(readStored({ method: 'lsp', nodes: [], edges: [] })).toBe(null)
   })
