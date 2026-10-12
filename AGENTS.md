@@ -2,7 +2,7 @@
 
 ## Documentation Structure
 
-- All documentation belongs inside `docs/`. The only exceptions are the root `README.md`, this `AGENTS.md`, and `CLAUDE.md`.
+- All documentation belongs inside `docs/`. The only exceptions are the root `README.md`, this `AGENTS.md`, `CLAUDE.md`, and `ripple/README.md`, the few lines an installed copy of the plugin carries to point back here.
 - Each part of the mod has one file in `docs/`, named for the part.
 - To get oriented, start from `README.md`, which covers the whole mod, then `docs/`.
 - Every markdown file is a factual description of the repository as it is, written so that a newcomer can read it and relate it directly to the code. If a sentence would not be true of the code as it stands, it does not belong.
@@ -12,8 +12,7 @@
 ## Code Structure
 
 - The repository is a plugin marketplace with one plugin in it. `.claude-plugin/marketplace.json` lists the plugin, and `ripple/` is the plugin.
-- `ripple/hooks/register.tsx` is the only file that touches the engine. Every other file in `ripple/hooks/` is pure: data in, data out, with nothing awaited.
-- `ripple/hooks/pane.tsx` is the pane's surface module. It paints what it is handed and posts what the person did; it decides nothing.
+- `ripple/hooks/register.tsx` is the only file that touches the engine. `ripple/hooks/pane.tsx` is the pane's surface module: it paints what it is handed and posts what the person did, and decides nothing. Every other file in `ripple/hooks/` is pure: data in, data out, with nothing awaited.
 - `ripple/types/index.d.ts` is the mod's contract: the map's types and the session state. It imports nothing.
 - Tests live in `ripple/tests/`, one file for each file of `ripple/hooks/` it tests, beside a shared `fixture.ts`.
 - `ripple/.claude-plugin/types/` is written by Claude Code and is never edited or committed.
@@ -31,7 +30,7 @@
 - No dependencies. The mod is what Claude Code loads from the folder, with no build step and no `package.json`.
 - A boolean is named for the question it answers: `isStale`, `hasNodes`.
 - A constant that shapes behavior has a name and a comment that says what it bounds.
-- Whatever a model sends is read leniently and repaired where it can be; whatever the mod sends a model is written out in `ripple/hooks/mapper.ts`, in one place.
+- Whatever a model sends is read leniently and repaired where it can be. The prompts the mod sends a model are written out in `ripple/hooks/mapper.ts`, in one place.
 
 ## Tests
 
