@@ -1,9 +1,24 @@
 {
   "name": "ripple",
   "version": "0.1.0",
-  "description": "See what Claude's edits reach",
-  "author": { "name": "Neal", "url": "https://github.com/nsodhi-cmu" },
+  "description": "See what your changes reach: an impact map of your diff, drawn inside Claude Code",
+  "author": {
+    "name": "Neal",
+    "url": "https://github.com/nsodhi-cmu"
+  },
   "repository": "https://github.com/nsodhi-cmu/claude-code-ripple",
   "license": "Apache-2.0",
-  "types": "./types/index.d.ts"
+  "types": "./types/index.d.ts",
+  "userConfig": {
+    "view": {
+      "type": "string",
+      "title": "Default view",
+      "description": "How the map is drawn when it opens: as a graph of boxes and edges, or as a tree.",
+      "options": [
+        "graph",
+        "tree"
+      ],
+      "default": "graph"
+    }
+  }
 }

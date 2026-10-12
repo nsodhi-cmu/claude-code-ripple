@@ -53,12 +53,22 @@ export type RippleOrigin = {
 /** What Ripple draws: a report, and the changes it is of. */
 export type RippleMap = RippleReport & RippleOrigin
 
+export type RippleMode = 'graph' | 'tree'
+
+/**
+ * What the person is looking at: which view, and the id of the node selected
+ * in it. `mode` is null until they switch views: until then the plugin's
+ * `view` option decides.
+ */
+export type RippleView = { mode: RippleMode | null; selected: string | null }
+
 declare module 'claude-code' {
   interface PluginState {
     ripple: {
       map: RippleMap | null
       /** The mapper at work and what it was sent to map; null when none is. */
       mapping: (RippleOrigin & { agentId: string }) | null
+      view: RippleView
     }
   }
 }

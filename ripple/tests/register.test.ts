@@ -4,7 +4,9 @@ import type { AgentInfo, On, RenderPropsOf } from 'claude-code'
 
 import { SHOP_MAP, SHOP_REPORT } from './fixture'
 import { HEAD, readChanges } from '../hooks/changes'
+import { rowText } from '../hooks/draw'
 import { NO_ASKING } from '../hooks/mapper'
+import { drawView } from '../hooks/view'
 
 // The whole loop through the engine: /ripple reads the changes from git and
 // starts a mapper, the mapper's report becomes the map, and the pane draws it.
@@ -188,14 +190,52 @@ const turnEnds = ($: Engine, agentId?: string) =>
     ...(agentId === undefined ? {} : { agentId }),
   })
 
-const mountPane = ($: Engine, surface: 'terminal' | 'desktop' | 'vscode' | 'mobile' = 'terminal') =>
-  $.ui.mount({ plugin: 'ripple', surface, component: 'Pane', requestId: 'ripple', props: PANE })
+/** The pane as the terminal draws it. */
+const mountPane = ($: Engine, props: RenderPropsOf['Pane'] = PANE) =>
+  $.ui.mount({ plugin: 'ripple', surface: 'terminal', component: 'Pane', requestId: 'ripple', props })
 
+/** Every line of text the pane shows: what is said around the map, and no part of the map itself. */
 const paneText = async ($: Engine): Promise<string[]> => {
   const pane = await mountPane($)
   const texts = (await pane.findAll({ type: 'Text' })).map(found => found.text)
   await pane.unmount()
   return texts
+}
+
+type Pane = Awaited<ReturnType<typeof mountPane>>
+
+/** The rows the map's surface module drew. */
+const mapRows = async (pane: Pane): Promise<string[]> => {
+  const drawn = (await pane.drawn({ in: 'map' })) as { children?: Array<{ children?: unknown[] }> }
+  return (drawn.children ?? []).map(row =>
+    (row.children ?? [])
+      .map(span => (typeof span === 'string' ? span : ((span as { children?: string[] }).children ?? []).join('')))
+      .join(''),
+  )
+}
+
+/** The name the detail under the map leads with: the selected node's. */
+const selectedName = async (pane: Pane): Promise<string | undefined> =>
+  (await pane.find({ type: 'Text', text: /^▸ \S+$/ }))?.text.slice(2)
+
+/** A room as wide as the pane and taller than the shop's graph, which the pane's own room for the map is too. */
+const ROOM = { columns: PANE.bodyColumns, rows: PANE.scroll.bodyRows }
+const hitOf = (name: string) => {
+  const node = SHOP_MAP.nodes.find(one => one.name === name)
+  const hit = drawView(SHOP_MAP, 'graph', null, ROOM).hits.find(one => one.id === node?.id)
+  if (hit === undefined) throw new Error(`${name} is not drawn`)
+  return hit
+}
+
+/** A session with the shop's map on hand, as its mapper reported it. */
+const mapped = async ($: Engine, on: On) => {
+  const seen = world(on)
+  seen.diff = PRICE_DIFF
+  await start($)
+  await ripple($)
+  await report($, 'mapper-1')
+  seen.statusOf.set('mapper-1', 'completed')
+  return seen
 }
 
 test('session start registers a deferred report tool, a mapper with nothing to edit with, and /ripple, and reads no git', async ($, on) => {
@@ -270,7 +310,7 @@ test('the loop: /ripple starts a mapper on the uncommitted diff, and its report 
   expect(drawn).toContain('uncommitted changes · via LSP · focus: formatPrice')
   expect(drawn).toContain(SHOP_MAP.summary)
   expect(drawn).not.toContain('◌ Mapping…')
-  expect(drawn).toContain('● renderCart')
+  expect(drawn).toContain('▸ renderCart')
 
   // The mapper's turn ends after its report: nothing more is said.
   const toasts = seen.toasts.length
@@ -444,47 +484,168 @@ test('a map kept from an earlier session comes back at session start', async ($,
   expect(await paneText($)).toContain('Ripple · 1 change → 6 dependents · 2 break · 1 to review')
 })
 
-test('asking about a flagged node puts the question to the conversation, and re-map starts a fresh mapper', async ($, on) => {
-  const seen = world(on)
-  seen.diff = PRICE_DIFF
-  await start($)
-  await ripple($)
-  await report($, 'mapper-1')
-  seen.statusOf.set('mapper-1', 'completed')
-
-  const pane = await mountPane($)
-  await pane.press({ key: 'ask-1' })
-  expect(seen.prompts).toHaveLength(1)
-  expect(seen.prompts[0]).toStartWith('Ripple mapped my uncommitted changes. Look at renderCart at src/cart.ts:14')
-  expect(seen.prompts[0]).toEndWith('Do not edit any files.')
-
-  await pane.press({ key: 'remap' })
-  expect(seen.spawned).toHaveLength(2)
-  expect(seen.status.at(-1)).toBe('mapping…')
-  await pane.unmount()
-})
-
-test('the terminal lists the nodes and the other surfaces draw the rings', async ($, on) => {
-  const seen = world(on)
-  seen.diff = PRICE_DIFF
-  await start($)
-  await ripple($)
-  await report($, 'mapper-1')
+test('the terminal draws the graph through its surface module, and the other surfaces draw the rings', async ($, on) => {
+  await mapped($, on)
 
   const terminal = await mountPane($)
-  expect(await terminal.find({ type: 'Text', text: /^◆ formatPrice$/ })).toMatchObject({ props: { color: 'suggestion' } })
-  expect(await terminal.find({ type: 'Text', text: /^▲ emailReceipt$/ })).toMatchObject({ props: { color: 'warning' } })
+  expect(await mapRows(terminal)).toEqual(drawView(SHOP_MAP, 'graph', null, ROOM).rows.map(rowText))
+  expect(await terminal.find({ in: 'map', type: 'Text', text: /^● renderCart$/ })).toMatchObject({
+    props: { color: 'error', bold: true, inverse: true },
+  })
+  expect(await terminal.find({ in: 'map', type: 'Text', text: /^◆ formatPrice$/ })).toMatchObject({
+    props: { color: 'suggestion' },
+  })
   expect(await terminal.find({ type: 'Svg' })).toBeUndefined()
   await terminal.unmount()
 
   const header = 'Ripple · 1 change → 6 dependents · 2 break · 1 to review'
   for (const surface of ['desktop', 'vscode', 'mobile'] as const) {
-    const rings = await mountPane($, surface)
+    const rings = await $.ui.mount({ plugin: 'ripple', surface, component: 'Pane', requestId: 'ripple', props: PANE })
     const svg = await rings.find({ type: 'Svg' })
     expect(svg?.props).toMatchObject({ alt: header, isInteractive: true, width: 720, height: 720 })
     expect(String(svg?.props.source)).toStartWith('<svg ')
+    expect(await rings.find({ type: 'Client' })).toBeUndefined()
     await rings.unmount()
   }
+})
+
+test('the detail under the map is of the selected node, and links to its file', async ($, on) => {
+  await mapped($, on)
+  const pane = await mountPane($)
+  expect(await selectedName(pane)).toBe('renderCart')
+  expect(await pane.find({ type: 'Link' })).toMatchObject({
+    props: { href: 'file:///repo/shop/src/cart.ts', label: 'src/cart.ts:14' },
+  })
+  expect(await pane.find({ type: 'Text', text: 'breaks: passes 1 argument; formatPrice now takes 2' })).toMatchObject({
+    props: { color: 'error' },
+  })
+  expect(await pane.find({ type: 'Text', text: 'uses formatPrice · used by CheckoutPage' })).toBeDefined()
+  await pane.unmount()
+})
+
+test('the keys under the map move the selection, and next flagged goes round what is at risk', async ($, on) => {
+  await mapped($, on)
+  const pane = await mountPane($)
+  const after = async (key: string) => {
+    await pane.press({ key })
+    return selectedName(pane)
+  }
+  expect(await after('l')).toBe('renderInvoice')
+  expect(await after('k')).toBe('InvoicePage')
+  expect(await after('h')).toBe('CheckoutPage')
+  expect(await after('j')).toBe('renderCart')
+  expect(await after('j')).toBe('formatPrice')
+  expect(await after('n')).toBe('renderCart')
+  expect(await after('n')).toBe('renderInvoice')
+  expect(await after('n')).toBe('emailReceipt')
+  // The map is drawn again around each selection.
+  expect(await pane.find({ in: 'map', type: 'Text', text: /^▲ emailReceipt$/ })).toMatchObject({
+    props: { inverse: true },
+  })
+  await pane.unmount()
+})
+
+test('a click on a box selects it, and the arrow keys then move from there', async ($, on) => {
+  await mapped($, on)
+  const pane = await mountPane($)
+  const box = hitOf('emailReceipt')
+  await pane.pointer({ type: 'down', x: box.x + 1, y: box.y + 1, button: 'left' })
+  expect(await selectedName(pane)).toBe('emailReceipt')
+
+  await pane.key({ key: 'left' })
+  expect(await selectedName(pane)).toBe('priceLabel')
+  await pane.key({ key: 'down' })
+  expect(await selectedName(pane)).toBe('formatPrice')
+
+  // Neither a click on empty room nor a move of the pointer selects anything.
+  await pane.pointer({ type: 'down', x: 0, y: 0, button: 'left' })
+  await pane.pointer({ type: 'move', x: box.x + 1, y: box.y + 1 })
+  await pane.pointer({ type: 'down', x: box.x + 1, y: box.y + 1, button: 'right' })
+  expect(await selectedName(pane)).toBe('formatPrice')
+  await pane.unmount()
+})
+
+test('t switches between the graph and the tree, keeping the selection', async ($, on) => {
+  await mapped($, on)
+  const pane = await mountPane($)
+  await pane.press({ key: 'l' })
+  expect((await pane.find({ key: 't' }))?.props.label).toBe('tree view')
+
+  await pane.press({ key: 't' })
+  expect((await mapRows(pane))[0]).toStartWith('◆ formatPrice')
+  expect(await selectedName(pane)).toBe('renderInvoice')
+  expect((await pane.find({ key: 't' }))?.props.label).toBe('graph view')
+  // Down is the next row here, not the layer below.
+  await pane.press({ key: 'j' })
+  expect(await selectedName(pane)).toBe('InvoicePage')
+
+  await pane.key({ key: 't' })
+  expect((await mapRows(pane))[0]).toContain('┌')
+  await pane.unmount()
+})
+
+test('with the view option set to tree, the map opens as a tree', { options: { view: 'tree' } }, async ($, on) => {
+  await mapped($, on)
+  const pane = await mountPane($)
+  expect((await mapRows(pane))[0]).toStartWith('◆ formatPrice')
+  await pane.press({ key: 't' })
+  expect((await mapRows(pane))[0]).toContain('┌')
+  await pane.unmount()
+})
+
+test('a pane too narrow for the graph draws the tree', async ($, on) => {
+  await mapped($, on)
+  const narrow = await mountPane($, { ...PANE, bodyColumns: 36 })
+  expect((await mapRows(narrow))[1]).toStartWith('├─ ● renderCart')
+  await narrow.unmount()
+})
+
+test('a short pane keeps to the header, the map as a tree, the selected node, and the keys', async ($, on) => {
+  await mapped($, on)
+  const short = await mountPane($, { ...PANE, bodyColumns: 96, scroll: { offset: 0, bodyRows: 12 } })
+  const texts = (await short.findAll({ type: 'Text' })).map(found => found.text)
+  expect(texts).toContain('Ripple · 1 change → 6 dependents · 2 break · 1 to review')
+  expect(texts).not.toContain(SHOP_MAP.summary)
+  expect(texts).not.toContain('uncommitted changes · via LSP')
+  expect(texts).not.toContain('◆ changed')
+  expect(texts).toContain('breaks: passes 1 argument; formatPrice now takes 2')
+
+  // Header, a line each for the selected node and its verdict, one row of keys: eight rows are the map's.
+  const rows = await mapRows(short)
+  expect(rows).toHaveLength(8)
+  expect(rows[1]).toStartWith('◆ formatPrice')
+  expect(rows.at(-1)).toBe('↓ 3 more below')
+
+  // The room has no graph to switch to, and down means the next row.
+  expect(await short.find({ key: 't' })).toBeUndefined()
+  await short.press({ key: 'j' })
+  expect(await selectedName(short)).toBe('CheckoutPage')
+  await short.unmount()
+})
+
+test('asking Claude puts a question about the selected node to the conversation', async ($, on) => {
+  const seen = await mapped($, on)
+  const pane = await mountPane($)
+  await pane.press({ key: 'l' })
+  await pane.press({ key: 'a' })
+  expect(seen.prompts).toHaveLength(1)
+  expect(seen.prompts[0]).toStartWith('Ripple mapped my uncommitted changes. Look at renderInvoice at src/invoice.ts:11')
+  expect(seen.prompts[0]).toEndWith('Do not edit any files.')
+  await pane.unmount()
+})
+
+test('re-map starts a fresh mapper on changes already mapped, and its map starts the selection over', async ($, on) => {
+  const seen = await mapped($, on)
+  const pane = await mountPane($)
+  await pane.press({ key: 'j' })
+  expect(await selectedName(pane)).toBe('formatPrice')
+
+  await pane.press({ key: 'r' })
+  expect(seen.spawned).toHaveLength(2)
+  expect(seen.status.at(-1)).toBe('mapping…')
+  await report($, 'mapper-2')
+  expect(await selectedName(pane)).toBe('renderCart')
+  await pane.unmount()
 })
 
 test('/ripple web writes the page and opens it', async ($, on) => {

@@ -1,7 +1,7 @@
 import { atom, read, update } from 'claude-code'
-import type { Elements, EngineInterface, Register, RenderElement } from 'claude-code'
+import type { Elements, EngineInterface, Register, RenderElement, TextProps } from 'claude-code'
 
-import type { RippleMap, RippleNode, RippleScope } from '../types'
+import type { RippleMap, RippleMode, RippleScope } from '../types'
 import {
   DEFAULT_BRANCH_COMMANDS,
   HEAD,
@@ -13,11 +13,12 @@ import {
   readRequest,
 } from './changes'
 import type { Base, Changes } from './changes'
+import { COLORS, LEGEND } from './draw'
+import type { Paint } from './draw'
 import {
   REPORT_DESCRIPTION,
   REPORT_SCHEMA,
   REPORT_TOOL,
-  flagged,
   headerText,
   originText,
   readReport,
@@ -35,15 +36,24 @@ import {
   reportReply,
   taskPrompt,
 } from './mapper'
+import { MOVES, detailOf, drawView, modeIn, nextFlagged, planOf, selectedOf, stepped } from './view'
 import { graphHtml, ringSvg } from './web'
 
 const PANE = 'ripple'
+/** The columns the pane asks for when it is docked beside the transcript. */
+const PANE_COLUMNS = 76
 const NOT_A_REPOSITORY = 'Ripple: this is not a git repository, so there are no changes to map.'
 const NO_DEFAULT_BRANCH =
   'Ripple: found no default branch to compare this one with (looked for origin/HEAD, main, and master). Run /ripple to map the uncommitted changes.'
 
 const map = atom({ plugin: 'ripple', key: 'map' } as const, null)
 const mapping = atom({ plugin: 'ripple', key: 'mapping' } as const, null)
+const view = atom({ plugin: 'ripple', key: 'view' } as const, { mode: null, selected: null })
+
+/** The view the map opens in until the person switches: the plugin's `view` option. */
+let firstMode: RippleMode = 'graph'
+/** The view the pane last drew the map in: the tree, wherever the graph had no room. */
+let drawnMode: RippleMode = 'graph'
 
 /** Whether the changes have moved on since the map on hand was made, as last checked. */
 let isStale = false
@@ -113,7 +123,7 @@ const refreshStatus = async ($: EngineInterface): Promise<void> => {
  */
 const openPane = async ($: EngineInterface): Promise<void> => {
   try {
-    const opened = await $.ui.open({ id: PANE, title: 'Ripple', columns: 72 })
+    const opened = await $.ui.open({ id: PANE, title: 'Ripple', columns: PANE_COLUMNS, focus: true })
     if (!opened.isPlaced) $.ui.toast('Ripple: the map is ready. Run /ripple to open it.')
   } catch (error) {
     $.ui.log(`ripple: could not open the pane: ${describe(error)}`, { to: 'debug' })
@@ -207,35 +217,62 @@ const writeWeb = async ($: EngineInterface): Promise<string> => {
   return isOpen ? 'Ripple: opened .ripple/graph.html' : `Ripple: wrote ${path}; open it in a browser.`
 }
 
-const MARK = {
-  changed: { glyph: '◆', color: 'suggestion' },
-  breaks: { glyph: '●', color: 'error' },
-  review: { glyph: '▲', color: 'warning' },
-  ok: { glyph: '○', color: 'text' },
-} as const
-
-/** One node on one line: its mark, its name, where it is, and why it is flagged. */
-const nodeLine = ({ Text }: Kit, node: RippleNode): RenderElement => {
-  const mark = MARK[node.role === 'changed' ? 'changed' : node.risk]
-  const where = node.line > 0 ? `${node.file}:${node.line}` : node.file
-  return (
-    <Text wrap="truncate-end">
-      <Text color={mark.color}>{`${mark.glyph} ${node.name}`}</Text>
-      <Text dimColor>{`  ${where}${node.reason === undefined ? '' : `  ${node.reason}`}`}</Text>
-    </Text>
-  )
+const styleOf = (paint: Paint): TextProps => {
+  const color = COLORS[paint]
+  return { ...(color === undefined ? {} : { color }), ...(paint === 'dim' ? { dimColor: true } : {}) }
 }
 
 const legend = ({ Box, Text }: Kit): RenderElement => (
   <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
-    <Text color="suggestion">◆ changed</Text>
-    <Text color="error">● breaks</Text>
-    <Text color="warning">▲ review</Text>
-    <Text>○ ok</Text>
+    {LEGEND.map(mark => (
+      <Text {...styleOf(mark.paint)}>{`${mark.glyph} ${mark.label}`}</Text>
+    ))}
   </Box>
 )
 
-export const register: Register = on => {
+/** What the person is looking at, the view's mode settled. */
+const readView = async ($: EngineInterface): Promise<{ mode: RippleMode; selected: string | null }> => {
+  const seen = await read($, view)
+  return { mode: seen.mode ?? firstMode, selected: seen.selected }
+}
+
+/** Asks Claude, in the conversation, about the selected node. */
+const ask = async ($: EngineInterface): Promise<void> => {
+  const held = await read($, map)
+  const node = held === null ? undefined : selectedOf(held, (await read($, view)).selected)
+  if (held === null || node === undefined) return
+  $.ui.toast(`Ripple: asked Claude about ${node.name}.`)
+  await $.prompt.submit({ text: askPrompt(node, held), asUser: true })
+}
+
+/** Does what one key of the pane does: a Button's hotkey, or a key the map was handed. */
+const press = async ($: EngineInterface, key: string): Promise<void> => {
+  try {
+    const held = await read($, map)
+    if (held === null) return
+    const { mode } = await readView($)
+    const move = MOVES[key]
+    if (move !== undefined) {
+      await update($, view, at => ({ ...at, selected: stepped(held, drawnMode, at.selected, move) }))
+    } else if (key === 'n') {
+      await update($, view, at => ({ ...at, selected: nextFlagged(held, at.selected) }))
+    } else if (key === 't') {
+      const other: RippleMode = mode === 'tree' ? 'graph' : 'tree'
+      await update($, view, at => ({ ...at, mode: other }))
+    } else if (key === 'a') {
+      await ask($)
+    } else if (key === 'r' || key === 'w') {
+      const said = key === 'w' ? await writeWeb($) : await showMap($, held.scope, held.focus, true)
+      if (said !== undefined) $.ui.toast(said)
+    }
+  } catch (error) {
+    $.ui.toast(`Ripple: ${describe(error)}`)
+  }
+}
+
+export const register: Register = (on, options) => {
+  firstMode = options.view === 'tree' ? 'tree' : 'graph'
+
   on('session.start', async ($, e, next) => {
     try {
       await $.tool.register({
@@ -325,6 +362,7 @@ export const register: Register = on => {
     }
     await update($, map, () => made)
     await update($, mapping, () => null)
+    await update($, view, seen => ({ ...seen, selected: null }))
     isStale = false
     await persist($, made)
     await refreshStatus($)
@@ -358,85 +396,135 @@ export const register: Register = on => {
     return done
   })
 
-  on('ui.render', { component: 'Pane', requestId: PANE }, async ($, e) => {
+  // What the map posts: the node a click landed on, or a key pressed over it.
+  on('ui.message', async ($, e, next) => {
+    if (e.requestId !== PANE || typeof e.data !== 'object' || e.data === null) return next(e)
+    const { select, key } = e.data as { select?: unknown; key?: unknown }
+    if (typeof select === 'string') await update($, view, at => ({ ...at, selected: select }))
+    else if (typeof key === 'string') await press($, key)
+    return {}
+  })
+
+  on('ui.render', { component: 'Pane', requestId: 'ripple' }, async ($, e) => {
     const held = await read($, map)
     const at = await read($, mapping)
+    const { mode, selected } = await readView($)
     const columns = Math.max(24, e.props.bodyColumns)
-
-    const attempt = (work: Promise<string | undefined>): void => {
-      void work
-        .then(said => {
-          if (said !== undefined) $.ui.toast(said)
-        })
-        .catch((error: unknown) => $.ui.toast(`Ripple: ${describe(error)}`))
-    }
-    const ask = (node: RippleNode): void => {
-      if (held === null) return
-      $.ui.toast(`Ripple: asked Claude about ${node.name}.`)
-      attempt($.prompt.submit({ text: askPrompt(node, held), asUser: true }).then(() => undefined))
-    }
-    const remap = (): void => {
-      if (held !== null) attempt(showMap($, held.scope, held.focus, true))
-    }
 
     const kit: Kit = $.ui.resolve(e)
     const { Box, Text, Button } = kit
     const hasNodes = held !== null && held.nodes.length > 0
-    const top = (
-      <Box flexDirection="column">
-        <Text bold>{held === null ? 'Ripple' : headerText(held)}</Text>
-        {held !== null && <Text dimColor>{originText(held)}</Text>}
-        {held?.summary !== undefined && <Text wrap="wrap">{held.summary}</Text>}
-        {at !== null && <Text color="warning">◌ Mapping…</Text>}
-        {at === null && held !== null && isStale && (
-          <Text dimColor>The changes have moved on since this map · /ripple to map them again</Text>
-        )}
-        {held === null && at === null && <Text dimColor>No map yet. Run /ripple to map your changes.</Text>}
-      </Box>
+    const notice =
+      at !== null
+        ? '◌ Mapping…'
+        : held === null
+          ? 'No map yet. Run /ripple to map your changes.'
+          : isStale
+            ? 'The changes have moved on since this map · /ripple to map them again'
+            : undefined
+    const noticeLine = notice !== undefined && (
+      <Text wrap="truncate-end" {...(at === null ? { dimColor: true } : { color: 'warning' })}>
+        {notice}
+      </Text>
     )
-    const buttons = (
-      <Box flexDirection="row" flexWrap="wrap" columnGap={2} marginTop={1}>
-        {(held === null ? [] : flagged(held)).slice(0, 9).map((node, index) => (
-          <Button
-            key={`ask-${index + 1}`}
-            label={`Ask about ${node.name}`}
-            hotkey={String(index + 1)}
-            plain
-            onPress={() => ask(node)}
-          />
-        ))}
-        {held !== null && <Button key="remap" label="Re-map" hotkey="r" plain onPress={remap} />}
-        {held !== null && (
-          <Button key="web" label="Open in browser" hotkey="w" plain onPress={() => attempt(writeWeb($))} />
-        )}
-      </Box>
+    const key = (hotkey: string, label: string, isDim = false): RenderElement => (
+      <Button
+        key={hotkey}
+        label={label}
+        hotkey={hotkey}
+        plain
+        {...(isDim ? { dimColor: true } : {})}
+        onPress={() => void press($, hotkey)}
+      />
     )
 
-    if (e.surface === 'terminal') {
+    if (e.surface !== 'terminal') {
+      const { Svg } = $.ui.resolve(e)
+      const side = Math.round(Math.min(720, Math.max(300, columns * 8)))
       return (
-        <Box flexDirection="column">
-          {top}
-          {hasNodes && legend(kit)}
+        <Box flexDirection="column" gap={1}>
+          <Box flexDirection="column">
+            <Text bold>{held === null ? 'Ripple' : headerText(held)}</Text>
+            {held !== null && <Text dimColor>{originText(held)}</Text>}
+            {held?.summary !== undefined && <Text wrap="wrap">{held.summary}</Text>}
+            {noticeLine}
+          </Box>
           {hasNodes && (
-            <Box flexDirection="column" marginTop={1}>
-              {held.nodes.map(node => nodeLine(kit, node))}
+            <Svg source={ringSvg(held)} alt={headerText(held)} width={side} height={side} isInteractive />
+          )}
+          {hasNodes && legend(kit)}
+          {held !== null && (
+            <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
+              {key('r', 'Re-map')}
+              {key('w', 'Open in browser')}
             </Box>
           )}
-          {buttons}
         </Box>
       )
     }
 
-    const { Svg } = $.ui.resolve(e)
-    const side = Math.round(Math.min(720, Math.max(300, columns * 8)))
+    const { Client, Link } = $.ui.resolve(e)
+    const node = hasNodes ? selectedOf(held, selected) : undefined
+    const detail = node === undefined || !hasNodes ? undefined : detailOf(held, node)
+    const root = (await $.session.root()).replace(/\\/g, '/').replace(/\/+$/, '')
+    const plan = planOf(
+      { columns, rows: e.props.scroll.bodyRows },
+      {
+        summary: held?.summary ?? '',
+        verdict: detail?.verdict?.text ?? '',
+        links: detail?.links ?? '',
+        hasNotice: notice !== undefined,
+      },
+    )
+    const room = { columns, rows: plan.mapRows }
+    const gap = plan.isCompact ? 0 : 1
+    drawnMode = modeIn(mode, room)
     return (
-      <Box flexDirection="column" gap={1}>
-        {top}
+      <Box flexDirection="column">
+        <Text bold wrap="truncate-end">
+          {held === null ? 'Ripple' : headerText(held)}
+        </Text>
+        {!plan.isCompact && held !== null && <Text dimColor>{originText(held)}</Text>}
+        {!plan.isCompact && held?.summary !== undefined && <Text wrap="wrap">{held.summary}</Text>}
+        {noticeLine}
+        {!plan.isCompact && hasNodes && legend(kit)}
         {hasNodes && (
-          <Svg source={ringSvg(held)} alt={headerText(held)} width={side} height={side} isInteractive />
+          <Box marginTop={gap}>
+            <Client key="map" module="./pane.tsx" props={drawView(held, mode, selected, room)} />
+          </Box>
         )}
-        {hasNodes && legend(kit)}
-        {buttons}
+        {detail !== undefined && node !== undefined && (
+          <Box flexDirection="column" marginTop={gap}>
+            <Text wrap="truncate-end">
+              <Text bold>{`▸ ${detail.name}`}</Text>
+              <Text dimColor>{` · ${detail.facts} · `}</Text>
+              <Link href={`file://${root}/${node.file}`} label={detail.where} />
+            </Text>
+            {detail.verdict !== undefined && (
+              <Text wrap={plan.isCompact ? 'truncate-end' : 'wrap'} {...styleOf(detail.verdict.paint)}>
+                {detail.verdict.text}
+              </Text>
+            )}
+            {!plan.isCompact && detail.links !== '' && (
+              <Text wrap="wrap" dimColor>
+                {detail.links}
+              </Text>
+            )}
+          </Box>
+        )}
+        {hasNodes && (
+          <Box flexDirection="row" flexWrap="wrap" columnGap={2} marginTop={gap}>
+            {key('h', '←', true)}
+            {key('j', '↓', true)}
+            {key('k', '↑', true)}
+            {key('l', '→', true)}
+            {key('n', 'next flagged', true)}
+            {key('a', 'ask Claude')}
+            {modeIn('graph', room) === 'graph' && key('t', drawnMode === 'tree' ? 'graph view' : 'tree view')}
+            {key('r', 're-map')}
+            {key('w', 'web page')}
+          </Box>
+        )}
       </Box>
     )
   })
