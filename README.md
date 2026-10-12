@@ -89,17 +89,6 @@ The tool's answer lists the callers that need review and tells Claude to open, c
 
 Mapping costs one model turn, so it runs when you ask for it and never by itself.
 
-## Try it
-
-The repository has two tiny projects with the same shape: one price formatter, four callers, two pages on top, and one caller with no test.
-
-```
-cd examples/ts-shop        # or examples/rust-shop
-claude --plugin-dir ../../ripple
-```
-
-Then ask: `Add a currency parameter to formatPrice. Only edit src/price.ts.` (in the Rust project, `format_price` and `src/price.rs`), or make that edit yourself, and run `/ripple`.
-
 For the most precise maps, install a language server plugin for the language (for example `vtsls` or `rust-analyzer` from the `boostvolt/claude-code-lsps` marketplace) and put the server on your `PATH`. Without one, Ripple still works: Claude falls back to the type checker, then to text search.
 
 ## Develop
@@ -120,7 +109,6 @@ ripple/
   hooks/demo.ts                   the canned map
   hooks/*.test.ts                 unit tests, and the whole loop driven through the engine
   types/index.d.ts                the map's types and the mod's session state
-examples/ts-shop, examples/rust-shop
 ```
 
 The first time Claude Code loads the mod from this folder it writes its own API types into `ripple/.claude-plugin/types/`, which is what `ripple/tsconfig.json` and your editor read.

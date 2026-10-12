@@ -6,7 +6,3 @@ ripple-spec.md
 
 # Laid by Claude Code each time it loads the mod, for this exact version.
 ripple/.claude-plugin/types/
-
-# Example project builds.
-target/
-node_modules/
