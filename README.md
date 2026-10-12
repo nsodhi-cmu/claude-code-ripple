@@ -46,6 +46,12 @@ A diff shows what you changed and nothing of what it reaches. Rename a struct, a
 Ripple is tested on Claude Code 2.1.296. Mods are new and their API still changes between releases, so an older Claude Code may not load it. At the prompt of a session:
 
 ```
+/plugin install ripple --marketplace nsodhi-cmu/claude-code-ripple
+```
+
+Answer `y` to add the marketplace, then pick a scope. The same in two steps:
+
+```
 /plugin marketplace add nsodhi-cmu/claude-code-ripple
 /plugin install ripple@claude-code-ripple
 ```
