@@ -44,7 +44,7 @@ function noteOf(node: RippleNode): string {
     else parts.push(node.change ?? 'changed')
   }
   if (node.risk !== 'ok') parts.push(node.risk)
-  if (!node.tested && node.role !== 'dependency') parts.push('untested')
+  if (!node.isTested && node.role !== 'dependency') parts.push('untested')
   return parts.join(' · ')
 }
 
@@ -387,7 +387,7 @@ export function ringSvg(map: RippleReport, options: SvgOptions = {}): string {
     const name = clip(node.name, isDense ? 10 : 18)
     const outline = isDependency
       ? `stroke="${INK.ok}" stroke-width="1"`
-      : node.tested
+      : node.isTested
         ? `stroke="${INK.label}" stroke-opacity="0.75" stroke-width="1.2"`
         : `stroke="${INK.label}" stroke-width="1.6" stroke-dasharray="3 2.4"`
     const halo = `paint-order="stroke" stroke="${INK.ground}" stroke-width="3" stroke-linejoin="round"`

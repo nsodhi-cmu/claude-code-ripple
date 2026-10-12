@@ -18,7 +18,7 @@ export type RippleNode = {
   /** `breaks` no longer compiles or runs, `review` may now behave differently, `ok` is unaffected. */
   risk: 'ok' | 'review' | 'breaks'
   /** Referenced from any test file. */
-  tested: boolean
+  isTested: boolean
   /** One line; present when the risk is not `ok`. */
   reason?: string
 }

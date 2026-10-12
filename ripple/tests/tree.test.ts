@@ -20,7 +20,7 @@ const node = (name: string, rest: Partial<RippleNode> = {}): RippleNode => ({
   role: 'dependent',
   depth: 1,
   risk: 'ok',
-  tested: true,
+  isTested: true,
   ...rest,
 })
 
@@ -106,7 +106,7 @@ describe('the drawing', () => {
     expect(drawing.rows[6]?.at(-1)).toEqual({ text: '           review', paint: 'review' })
     const untestedHelper = {
       ...SHOP_MAP,
-      nodes: SHOP_MAP.nodes.map(one => (one.role === 'dependency' ? { ...one, tested: false } : one)),
+      nodes: SHOP_MAP.nodes.map(one => (one.role === 'dependency' ? { ...one, isTested: false } : one)),
     }
     expect(rowText(drawTree(untestedHelper, null, { columns: 90, rows: 40 }).rows[7] ?? [])).toBe(
       '├─ → toFixed2         src/price.ts:9',

@@ -7,6 +7,7 @@ import { rankOf } from './map'
 // above the change and dependencies below it, with the edges between
 // neighboring layers drawn in box characters. Nothing here touches `$`.
 
+/** The most characters of a name a box shows. */
 const NAME_CHARS = 20
 /** A box is its label, a space and a border on each side. */
 const BOX_PADDING = 4

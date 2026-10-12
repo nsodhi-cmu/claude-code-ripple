@@ -28,7 +28,7 @@ Run the diff command the task gives you and read the diff. List every symbol it 
 - behavior: the same shape, a different result or side effect
 - renamed, added, or removed
 
-Leave out what cannot reach other code: comments, formatting, documentation, and edits inside tests.
+Name each change once, at the finest grain that changed: the field or the variant when only it changed, the whole type when more of its shape did. Never report both a type and its member for one edit. Leave out what cannot reach other code: comments, formatting, documentation, and edits inside tests.
 
 # 2. Find what depends on it
 
@@ -52,7 +52,7 @@ Open each dependent where it uses the changed symbol and read enough to judge it
 
 Judge each dependent by its own code. One whose only trouble is that something it uses breaks is ok: fixing that other symbol fixes it.
 
-Give every breaks and every review one line that says exactly what is wrong in terms of this code, such as "passes 1 argument; formatPrice now takes 2". Start the line with "security:" when it is a safety concern. Mark a symbol tested when any test file references it.
+Give every breaks and every review one line that says exactly what is wrong in terms of this code, such as "passes 1 argument; formatPrice now takes 2". Start the line with "security:" when it is a safety concern. Set isTested on a symbol when any test file references it.
 
 # 4. Report
 
@@ -61,7 +61,7 @@ Call ${REPORT_TOOL} exactly once.
 - role is changed, dependent, or dependency. Set change on changed symbols only, with a reason that says in one line what changed. Set risk on dependents; everything else is ok.
 - edges: one per use, from the id of the symbol that uses to the id of the symbol it uses. Every dependent needs an edge to what it uses, and every dependency an edge from the changed symbol that uses it.
 - At most ${MAX_NODES} nodes. If you must cut, keep the changed symbols, then what breaks, then what needs review, then the nearest dependents.
-- summary: what this change puts at risk, in one or two short plain sentences, for someone deciding whether it is safe to ship. The reasons carry the detail.
+- summary: what this change puts at risk, for someone deciding whether it is safe to ship. One or two short plain sentences, under 200 characters: the reasons carry the detail, and what the change did not cause has no place in it.
 - If the diff touches no symbol that other code could use, report empty nodes and edges and say so in the summary.
 
 After the tool answers, reply with one short sentence and stop.`

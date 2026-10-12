@@ -3,9 +3,11 @@ import type { RippleEdge, RippleMap, RippleNode, RippleOrigin, RippleReport } fr
 // The map as data: reading what the mapper reports, and saying what it holds.
 // Nothing here touches `$`.
 
+/** The most nodes a map holds. */
 export const MAX_NODES = 60
+/** The most characters of a reason and of a summary that are kept. */
 const REASON_CHARS = 200
-const SUMMARY_CHARS = 320
+const SUMMARY_CHARS = 240
 export const REPORT_TOOL = 'mcp__ripple__report'
 
 const METHODS = ['lsp', 'tooling', 'grep'] as const
@@ -35,7 +37,7 @@ export const REPORT_SCHEMA: Record<string, unknown> = {
     },
     summary: {
       type: 'string',
-      description: 'What the change puts at risk, in one or two short plain sentences.',
+      description: 'What the change puts at risk, in one or two short plain sentences, under 200 characters.',
     },
     nodes: {
       type: 'array',
@@ -43,7 +45,7 @@ export const REPORT_SCHEMA: Record<string, unknown> = {
       description: 'One per symbol: the changed ones, their dependents, and their dependencies.',
       items: {
         type: 'object',
-        required: ['id', 'name', 'kind', 'file', 'line', 'role', 'risk', 'tested'],
+        required: ['id', 'name', 'kind', 'file', 'line', 'role', 'risk', 'isTested'],
         properties: {
           id: { type: 'string', description: 'Unique: "<file>:<name>".' },
           name: {
@@ -78,7 +80,7 @@ export const REPORT_SCHEMA: Record<string, unknown> = {
             description:
               'Dependents only: breaks when it no longer compiles or runs as written, review when it may now behave differently, ok otherwise.',
           },
-          tested: { type: 'boolean', description: 'True when any test file references it.' },
+          isTested: { type: 'boolean', description: 'True when any test file references it.' },
           reason: {
             type: 'string',
             description:
@@ -154,7 +156,7 @@ function readNode(raw: unknown): RippleNode | undefined {
     role,
     depth: 0,
     risk: role === 'dependent' ? (oneOf(RISKS, raw.risk) ?? 'ok') : 'ok',
-    tested: raw.tested === true || raw.tested === 'true',
+    isTested: raw.isTested === true || raw.isTested === 'true',
     ...(role === 'changed' && change !== undefined ? { change } : {}),
     ...(reason === '' ? {} : { reason }),
   }

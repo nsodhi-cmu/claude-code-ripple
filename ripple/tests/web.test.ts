@@ -22,7 +22,7 @@ const dependent = (name: string, depth: number, extra: Partial<RippleNode> = {})
   role: 'dependent',
   depth,
   risk: 'ok',
-  tested: true,
+  isTested: true,
   ...extra,
 })
 

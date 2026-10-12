@@ -14,7 +14,7 @@ const node = (
   role: 'dependent',
   depth: 1,
   risk: 'ok',
-  tested: true,
+  isTested: true,
   ...rest,
 })
 
@@ -38,7 +38,7 @@ export const SHOP_MAP: RippleMap = {
     }),
     node('renderCart', 'src/cart.ts', 14, {
       risk: 'breaks',
-      tested: false,
+      isTested: false,
       reason: 'passes 1 argument; formatPrice now takes 2',
     }),
     node('renderInvoice', 'src/invoice.ts', 11, {

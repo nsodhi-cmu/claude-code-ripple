@@ -103,7 +103,7 @@ export function detailOf(report: RippleReport, node: RippleNode): Detail {
     ...(uses.length > 0 ? [`uses ${names(uses)}`] : []),
     ...(usedBy.length > 0 ? [`used by ${names(usedBy)}`] : []),
   ]
-  const facts = [node.kind, ...(node.tested || node.role === 'dependency' ? [] : ['untested'])]
+  const facts = [node.kind, ...(node.isTested || node.role === 'dependency' ? [] : ['untested'])]
   const lead =
     node.role !== 'changed'
       ? node.risk

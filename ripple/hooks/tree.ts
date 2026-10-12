@@ -5,6 +5,7 @@ import type { Drawing, Hit, Move, Room, Span } from './draw'
 // The tree view: one row a node, each changed symbol with its dependents
 // hanging under it and then what it uses. Nothing here touches `$`.
 
+/** The most characters of a name a row shows. */
 const NAME_CHARS = 32
 /** How far the words after a location are pushed right to line up; a longer location pushes its own. */
 const WHERE_CHARS = 28
@@ -60,7 +61,7 @@ function wordsOf(node: RippleNode): string {
     words.push(node.change === 'signature' || node.change === 'behavior' ? `${node.change} changed` : (node.change ?? 'changed'))
   }
   if (node.risk !== 'ok') words.push(node.risk)
-  if (!node.tested && node.role !== 'dependency') words.push('untested')
+  if (!node.isTested && node.role !== 'dependency') words.push('untested')
   return words.join(' · ')
 }
 

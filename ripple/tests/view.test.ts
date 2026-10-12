@@ -132,7 +132,7 @@ describe('the detail under the map', () => {
 
   test('a node that is fine has no verdict, and a dependency is never called untested', () => {
     expect(detailOf(SHOP_MAP, node('priceLabel')).verdict).toBeUndefined()
-    const helper = detailOf(SHOP_MAP, { ...node('toFixed2'), tested: false })
+    const helper = detailOf(SHOP_MAP, { ...node('toFixed2'), isTested: false })
     expect(helper).toEqual({ name: 'toFixed2', facts: 'function', where: 'src/price.ts:9', links: 'used by formatPrice' })
   })
 })

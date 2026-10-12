@@ -29,7 +29,7 @@ const node = (name: string, rest: Partial<RippleNode> = {}): RippleNode => ({
   role: 'dependent',
   depth: 1,
   risk: 'ok',
-  tested: true,
+  isTested: true,
   ...rest,
 })
 

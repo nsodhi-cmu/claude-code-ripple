@@ -32,7 +32,7 @@ const reported = (name: string, rest: Record<string, unknown> = {}) => ({
   line: 1,
   role: 'dependent',
   risk: 'ok',
-  tested: true,
+  isTested: true,
   ...rest,
 })
 
@@ -125,7 +125,7 @@ describe('reading a report', () => {
         depth: 0,
         change: 'renamed',
         risk: 'ok',
-        tested: false,
+        isTested: false,
       },
       {
         id: 'b.rs:user',
@@ -136,7 +136,7 @@ describe('reading a report', () => {
         role: 'dependent',
         depth: 1,
         risk: 'breaks',
-        tested: false,
+        isTested: false,
         reason: 'still names the old struct',
       },
       {
@@ -148,7 +148,7 @@ describe('reading a report', () => {
         role: 'dependency',
         depth: 1,
         risk: 'ok',
-        tested: false,
+        isTested: false,
       },
     ])
   })
@@ -203,7 +203,7 @@ describe('reading a report', () => {
     const reason = report.nodes[1]?.reason ?? ''
     expect(reason).toHaveLength(200)
     expect(reason).toEndWith('word word…')
-    expect(report.summary).toHaveLength(320)
+    expect(report.summary).toHaveLength(240)
     expect(report.summary).toEndWith('…')
     expect(read({ method: 'lsp', summary: 'Nothing breaks.', nodes: [], edges: [] }).report.summary).toBe('Nothing breaks.')
   })
