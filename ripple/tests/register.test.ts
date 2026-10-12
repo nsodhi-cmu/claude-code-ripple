@@ -51,6 +51,8 @@ const world = (on: On, stored: Record<string, unknown> = {}) => {
     toasts: [] as string[],
     prompts: [] as string[],
     opened: [] as string[],
+    /** Whether each opening of the pane asked for the keyboard. */
+    askedFocus: [] as boolean[],
     closed: [] as string[],
     tools: [] as Array<{ name: string; isDeferred: unknown }>,
     agents: [] as Array<{ name: string; tools: unknown; background: unknown }>,
@@ -129,6 +131,7 @@ const world = (on: On, stored: Record<string, unknown> = {}) => {
   on('ui.log', () => ({ value: undefined }))
   on('ui.open', ($, e) => {
     seen.opened.push(e.id)
+    seen.askedFocus.push(e.focus === true)
     return { value: { isPlaced: true } }
   })
   on('ui.close', ($, e) => {
@@ -378,6 +381,11 @@ test('/ripple while a mapper is at work starts no second one, but one that died 
   await ripple($)
   expect(await ripple($)).toEqual({})
   expect(seen.spawned).toHaveLength(1)
+  // Another request is not quietly swallowed by the one under way.
+  expect((await ripple($, 'renderCart')).text).toBe(
+    'Ripple: still mapping what was asked before. Run this again once that map is in.',
+  )
+  expect(seen.spawned).toHaveLength(1)
 
   seen.statusOf.set('mapper-1', 'killed')
   await ripple($)
@@ -623,11 +631,32 @@ test('a short pane keeps to the header, the map as a tree, the selected node, an
   await short.unmount()
 })
 
+test('the pane asks for the keyboard when the person opens it, and never when a map arrives', async ($, on) => {
+  const seen = world(on)
+  seen.diff = PRICE_DIFF
+  await start($)
+  await ripple($)
+  await report($, 'mapper-1')
+  expect(seen.askedFocus).toEqual([true, false])
+})
+
+test('no letter starts a turn, a mapper, or a browser, so a prompt typed over the pane sets nothing off', async ($, on) => {
+  const seen = await mapped($, on)
+  const pane = await mountPane($)
+  const letters = (await pane.findAll({ type: 'Button' })).map(button => button.key).filter(key => !/^\d$/.test(key ?? ''))
+  expect(letters).toEqual(['h', 'j', 'k', 'l', 'n', 't'])
+  for (const key of 'abcdefgimopqrsuvwxyz') await pane.key({ key })
+  expect(seen.prompts).toEqual([])
+  expect(seen.spawned).toHaveLength(1)
+  expect(seen.files.size).toBe(0)
+  await pane.unmount()
+})
+
 test('asking Claude puts a question about the selected node to the conversation', async ($, on) => {
   const seen = await mapped($, on)
   const pane = await mountPane($)
   await pane.press({ key: 'l' })
-  await pane.press({ key: 'a' })
+  await pane.press({ key: '1' })
   expect(seen.prompts).toHaveLength(1)
   expect(seen.prompts[0]).toStartWith('Ripple mapped my uncommitted changes. Look at renderInvoice at src/invoice.ts:11')
   expect(seen.prompts[0]).toEndWith('Do not edit any files.')
@@ -640,7 +669,7 @@ test('re-map starts a fresh mapper on changes already mapped, and its map starts
   await pane.press({ key: 'j' })
   expect(await selectedName(pane)).toBe('formatPrice')
 
-  await pane.press({ key: 'r' })
+  await pane.press({ key: '2' })
   expect(seen.spawned).toHaveLength(2)
   expect(seen.status.at(-1)).toBe('mapping…')
   await report($, 'mapper-2')

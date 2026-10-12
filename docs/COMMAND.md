@@ -32,7 +32,7 @@ Every reading of the changes has a print: a short hash of the scope, the diff, a
 - when a mapper is already at work, opens the pane, which says so;
 - otherwise starts a [mapper](MAPPER.md) and opens the pane.
 
-The `r` key starts a mapper even when the map is current.
+The `2` key starts a mapper even when the map is current.
 
 After each of the person's own turns, while a map is on hand, the changes of its scope are read again. When their print is no longer the map's, the pane says the changes have moved on.
 

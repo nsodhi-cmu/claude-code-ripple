@@ -48,4 +48,4 @@ A mapper whose turn ends with no report stops the wait, and the person is told. 
 
 ## Asking Claude
 
-The `a` key submits `askPrompt` to the conversation. The conversation never saw the map, so the prompt carries what Ripple knows about the selected node: where it is, what changed, the mapper's verdict and reason. It asks for an explanation and for no edits.
+The `1` key submits `askPrompt` to the conversation. The conversation never saw the map, so the prompt carries what Ripple knows about the selected node: where it is, what changed, the mapper's verdict and reason. It asks for an explanation and for no edits.

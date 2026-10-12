@@ -44,13 +44,15 @@ One node is selected. `selectedOf` answers the one the view names while the map 
 
 A new map starts the selection over.
 
+The keys that start something are digits: `1` asks Claude about the selected node, `2` maps the same changes again, and `3` writes the web page. A prompt typed while the pane has the keyboard cannot set one off with its first letter.
+
 ## The Pane
 
 The `ui.render` hook in `ripple/hooks/register.tsx` draws the pane. In a terminal it holds, top to bottom: the header, which changes the map is of and how they were traced, the mapper's summary, a notice while a mapper is at work or once the changes have moved on, the legend, the map, the detail of the selected node, and the keys.
 
 `planOf` shares the pane's rows out. A pane with fewer than `ROOMY_ROWS` rows keeps only the header, the notice, the map, one line each for the selected node and its verdict, and the keys.
 
-The map itself is drawn by a surface module, `ripple/hooks/pane.tsx`, because only a surface module is handed pointer events and the arrow keys. It paints the drawing it is given and posts two things to the hooks module: the node a click landed on, and each key pressed while it holds the keyboard. The hooks module keeps the view, in the session state `ripple.view`, and decides what a click or a key does. The letter keys are Buttons the hooks module draws under the map, which work whenever the pane has the keyboard; the arrow keys reach the map only after a click on it.
+The map itself is drawn by a surface module, `ripple/hooks/pane.tsx`, because only a surface module is handed pointer events and the arrow keys. It paints the drawing it is given and posts two things to the hooks module: the node a click landed on, and each key pressed while it holds the keyboard. The hooks module keeps the view, in the session state `ripple.view`, and decides what a click or a key does. The keys are Buttons the hooks module draws under the map, which work whenever the pane has the keyboard; the arrow keys reach the map only after a click on it. The pane asks for the keyboard when the person opens it, and not when a map arrives.
 
 The `view` option in the plugin's manifest picks the view a map opens in. The `t` key switches for the rest of the session.
 

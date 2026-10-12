@@ -31,7 +31,7 @@ Two callers of formatPrice no longer compile, and receipts may show the wrong cu
 breaks: passes 1 argument; formatPrice now takes 2
 uses formatPrice · used by CheckoutPage
 
-h: ←  j: ↓  k: ↑  l: →  n: next flagged  a: ask Claude  t: tree view  r: re-map  w: web page
+h: ←  j: ↓  k: ↑  l: →  n: next flagged  t: tree view  1: ask Claude  2: re-map  3: web page
 ```
 
 A diff shows what you changed and nothing of what it reaches. Rename a struct, add a parameter, or loosen a check, and code in files you never opened breaks, or quietly starts doing something else. Ripple shows you that code before you ship.
@@ -72,12 +72,12 @@ The pane opens beside the transcript in a wide terminal and above the prompt in 
 | :- | :- |
 | `h` `j` `k` `l` | Move the selection left, down, up, and right. |
 | `n` | Go to the next flagged node. |
-| `a` | Ask Claude, in the conversation, about the selected node. It is asked to explain and to edit nothing. |
 | `t` | Switch between the graph and the tree. |
-| `r` | Map the same changes again. |
-| `w` | The same as `/ripple web`. |
+| `1` | Ask Claude, in the conversation, about the selected node. It is asked to explain and to edit nothing. |
+| `2` | Map the same changes again. |
+| `3` | The same as `/ripple web`. |
 
-The keys work while the pane has the keyboard, which it asks for when it opens. `ctrl+x tab` moves the keyboard between the pane and the prompt, and typing anything else goes back to the prompt. A click on a box selects it, and once the map has been clicked the arrow keys move the selection too.
+The keys work while the pane has the keyboard, which it asks for when you open it. `ctrl+x tab` moves the keyboard between the pane and the prompt, and typing anything else goes back to the prompt. The keys that start something are digits, so the first letter of a prompt never sets one off. A click on a box selects it, and once the map has been clicked the arrow keys move the selection too.
 
 A layer too wide for the pane keeps the selected node, what it is linked to, and what is flagged, and folds the rest into a `+3 more` box. A map too tall keeps the layers around the selection. Where there is no room for a graph at all, the pane draws the tree:
 
@@ -148,7 +148,7 @@ What Ripple does with that access:
 - **Starts one agent per mapping**, in the background, which reads your code. It can call `Read`, `Bash`, `LSP`, and the report tool, and any call that would have asked for your permission is refused.
 - **Stores** the last map of each project in the mod's own store, under your Claude Code configuration directory.
 - **Writes** one file, `.ripple/graph.html`, and only for `/ripple web`, which also runs your system's file opener (`open`, `xdg-open`, or `rundll32` on Windows).
-- **Submits a prompt** to your conversation only when you press `a`.
+- **Submits a prompt** to your conversation only when you press `1`.
 
 It makes no network requests of its own.
 

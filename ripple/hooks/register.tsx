@@ -40,6 +40,14 @@ import { MOVES, detailOf, drawView, modeIn, nextFlagged, planOf, selectedOf, ste
 import { graphHtml, ringSvg } from './web'
 
 const PANE = 'ripple'
+/**
+ * The keys that start something: a turn of the conversation, a mapper, a
+ * browser. They are digits so that a prompt typed while the pane has the
+ * keyboard does not set one off with its first letter.
+ */
+const ASK = '1'
+const REMAP = '2'
+const WEB = '3'
 /** The columns the pane asks for when it is docked beside the transcript. */
 const PANE_COLUMNS = 76
 const NOT_A_REPOSITORY = 'Ripple: this is not a git repository, so there are no changes to map.'
@@ -117,13 +125,19 @@ const refreshStatus = async ($: EngineInterface): Promise<void> => {
 }
 
 /**
- * Opens the pane. Opened from a command or a press it is placed at any width;
- * opened when a report arrives it may wait for a wider terminal, and then a
- * toast says how to bring it up.
+ * Opens the pane. Opened because the person asked, it is placed at any width
+ * and asks for the keyboard. Opened when a report arrives it takes no
+ * keyboard from them, and it may wait for a wider terminal: then a toast says
+ * how to bring it up.
  */
-const openPane = async ($: EngineInterface): Promise<void> => {
+const openPane = async ($: EngineInterface, isAsked: boolean): Promise<void> => {
   try {
-    const opened = await $.ui.open({ id: PANE, title: 'Ripple', columns: PANE_COLUMNS, focus: true })
+    const opened = await $.ui.open({
+      id: PANE,
+      title: 'Ripple',
+      columns: PANE_COLUMNS,
+      ...(isAsked ? { focus: true as const } : {}),
+    })
     if (!opened.isPlaced) $.ui.toast('Ripple: the map is ready. Run /ripple to open it.')
   } catch (error) {
     $.ui.log(`ripple: could not open the pane: ${describe(error)}`, { to: 'debug' })
@@ -166,7 +180,11 @@ const showMap = async (
     isStale = false
     return undefined
   }
-  if (await isMapping($)) return undefined
+  if (await isMapping($)) {
+    const at = await read($, mapping)
+    const isSame = at !== null && at.print === changes.print && at.focus === focus
+    return isSame ? undefined : 'Ripple: still mapping what was asked before. Run this again once that map is in.'
+  }
   const spawned = await $.agent.spawn({
     subagentType: MAPPER_TYPE,
     description: `Map ${describeChanges(changes)}`,
@@ -250,19 +268,18 @@ const press = async ($: EngineInterface, key: string): Promise<void> => {
   try {
     const held = await read($, map)
     if (held === null) return
-    const { mode } = await readView($)
     const move = MOVES[key]
     if (move !== undefined) {
       await update($, view, at => ({ ...at, selected: stepped(held, drawnMode, at.selected, move) }))
     } else if (key === 'n') {
       await update($, view, at => ({ ...at, selected: nextFlagged(held, at.selected) }))
     } else if (key === 't') {
-      const other: RippleMode = mode === 'tree' ? 'graph' : 'tree'
+      const other: RippleMode = drawnMode === 'tree' ? 'graph' : 'tree'
       await update($, view, at => ({ ...at, mode: other }))
-    } else if (key === 'a') {
+    } else if (key === ASK) {
       await ask($)
-    } else if (key === 'r' || key === 'w') {
-      const said = key === 'w' ? await writeWeb($) : await showMap($, held.scope, held.focus, true)
+    } else if (key === REMAP || key === WEB) {
+      const said = key === WEB ? await writeWeb($) : await showMap($, held.scope, held.focus, true)
       if (said !== undefined) $.ui.toast(said)
     }
   } catch (error) {
@@ -315,7 +332,7 @@ export const register: Register = (on, options) => {
       const request = readRequest(e.args)
       if (request.verb === 'map') {
         said = await showMap($, request.scope, request.focus, false)
-        if (said === undefined) await openPane($)
+        if (said === undefined) await openPane($, true)
       } else if (request.verb === 'web') {
         said = await writeWeb($)
       } else {
@@ -366,7 +383,7 @@ export const register: Register = (on, options) => {
     isStale = false
     await persist($, made)
     await refreshStatus($)
-    void openPane($)
+    void openPane($, false)
     return { result: reportReply(reported.report, reported.notes) }
   }).catch(() => ({ deny: 'Ripple failed while reading the report.' }))
 
@@ -455,8 +472,8 @@ export const register: Register = (on, options) => {
           {hasNodes && legend(kit)}
           {held !== null && (
             <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
-              {key('r', 'Re-map')}
-              {key('w', 'Open in browser')}
+              {key(REMAP, 'Re-map')}
+              {key(WEB, 'Open in browser')}
             </Box>
           )}
         </Box>
@@ -519,10 +536,10 @@ export const register: Register = (on, options) => {
             {key('k', '↑', true)}
             {key('l', '→', true)}
             {key('n', 'next flagged', true)}
-            {key('a', 'ask Claude')}
-            {modeIn('graph', room) === 'graph' && key('t', drawnMode === 'tree' ? 'graph view' : 'tree view')}
-            {key('r', 're-map')}
-            {key('w', 'web page')}
+            {modeIn('graph', room) === 'graph' && key('t', drawnMode === 'tree' ? 'graph view' : 'tree view', true)}
+            {key(ASK, 'ask Claude')}
+            {key(REMAP, 're-map')}
+            {key(WEB, 'web page')}
           </Box>
         )}
       </Box>
