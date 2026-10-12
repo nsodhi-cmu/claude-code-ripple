@@ -98,9 +98,15 @@ const LANGUAGES: readonly Language[] = [
   },
 ]
 
+/** What follows the last dot of a file's name, in lower case; '' for a name with no dot in it. */
+function extensionOf(file: string): string {
+  const name = file.slice(file.lastIndexOf('/') + 1)
+  return name.includes('.') ? name.slice(name.lastIndexOf('.') + 1).toLowerCase() : ''
+}
+
 /** The notes for the languages these files are written in, in the order above. */
 export function languageNotes(files: readonly ChangedFile[]): string[] {
-  const extensions = new Set(files.map(entry => entry.file.split('.').pop()?.toLowerCase() ?? ''))
+  const extensions = new Set(files.map(entry => extensionOf(entry.file)))
   return LANGUAGES.filter(language => language.extensions.some(extension => extensions.has(extension))).map(
     language => `${language.name}: ${language.notes}`,
   )

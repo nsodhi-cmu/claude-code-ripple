@@ -92,7 +92,7 @@ describe('language notes', () => {
   })
 
   test('a language Ripple has no notes for adds nothing, and neither does a file with no extension', () => {
-    expect(languages('Main.java', 'Makefile', 'docs/py')).toEqual([])
+    expect(languages('Main.java', 'Makefile', 'docs/py', 'go', 'tools.d/rs')).toEqual([])
   })
 
   test('an extension is read whatever its case, and only from the end of the name', () => {
