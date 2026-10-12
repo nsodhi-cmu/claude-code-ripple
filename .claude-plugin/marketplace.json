@@ -1,14 +1,18 @@
 {
   "name": "claude-code-ripple",
-  "owner": { "name": "Neal", "url": "https://github.com/nsodhi-cmu" },
+  "owner": {
+    "name": "Neal",
+    "url": "https://github.com/nsodhi-cmu"
+  },
   "metadata": {
-    "description": "Ripple: see what Claude's edits reach, inside Claude Code."
+    "description": "Ripple: see what your changes reach, inside Claude Code."
   },
   "plugins": [
     {
       "name": "ripple",
       "source": "./ripple",
-      "description": "See what Claude's edits reach"
+      "description": "See what your changes reach: a map of everything that depends on your diff, drawn inside Claude Code",
+      "category": "development"
     }
   ]
 }

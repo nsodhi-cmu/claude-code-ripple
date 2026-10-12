@@ -1,13 +1,21 @@
 {
   "name": "ripple",
-  "version": "0.1.0",
-  "description": "See what your changes reach: an impact map of your diff, drawn inside Claude Code",
+  "version": "0.2.0",
+  "description": "See what your changes reach: a map of everything that depends on your diff, drawn inside Claude Code",
   "author": {
     "name": "Neal",
     "url": "https://github.com/nsodhi-cmu"
   },
+  "homepage": "https://github.com/nsodhi-cmu/claude-code-ripple",
   "repository": "https://github.com/nsodhi-cmu/claude-code-ripple",
   "license": "Apache-2.0",
+  "keywords": [
+    "mod",
+    "impact-analysis",
+    "call-graph",
+    "diff",
+    "code-review"
+  ],
   "types": "./types/index.d.ts",
   "userConfig": {
     "view": {
