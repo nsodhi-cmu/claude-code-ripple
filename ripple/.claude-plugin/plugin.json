@@ -21,7 +21,7 @@
     "view": {
       "type": "string",
       "title": "Default view",
-      "description": "How the map is drawn when it opens: as a graph of boxes and edges, or as a tree.",
+      "description": "How the map is drawn when it opens: as a graph of boxes and links, or as a tree.",
       "options": [
         "graph",
         "tree"

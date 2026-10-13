@@ -168,9 +168,9 @@ function readNode(raw: unknown): RippleNode | undefined {
   }
 }
 
-/** A node's place along the flow of use: dependents before the change, dependencies after it. */
-export function rankOf(node: RippleNode): number {
-  return node.role === 'dependent' ? -node.depth : node.depth
+/** A symbol's place along the flow of use, or a file's: dependents before the change, dependencies after it. */
+export function rankOf(at: Pick<RippleNode, 'role' | 'depth'>): number {
+  return at.role === 'dependent' ? -at.depth : at.depth
 }
 
 /** Whether no symbol of role `from` can be the user of one of role `to`: the edge was reported backward. */

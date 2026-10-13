@@ -14,8 +14,10 @@ import {
   readRequest,
 } from './changes'
 import type { Base, Changes } from './changes'
-import { COLORS, LEGEND } from './draw'
-import type { Paint } from './draw'
+import { COLORS, LEGEND, markOf } from './draw'
+import type { Paint, Pan, Room } from './draw'
+import { fileOf, filesOf } from './files'
+import { drawList, listSays, scrollList, showInList, stepInList } from './list'
 import {
   REPORT_DESCRIPTION,
   REPORT_SCHEMA,
@@ -37,7 +39,7 @@ import {
   reportReply,
   taskPrompt,
 } from './mapper'
-import { MOVES, detailOf, drawView, modeIn, nextFlagged, planOf, selectedOf, stepped } from './view'
+import { LIST_MOVES, MOVES, VIEWS, factsOf, modeIn, nextFlagged, planOf, selectedOf } from './view'
 import { graphHtml, ringSvg } from './web'
 
 const PANE = 'ripple'
@@ -65,12 +67,25 @@ const GIT_FAILED =
 
 const map = atom({ plugin: 'ripple', key: 'map' } as const, null)
 const mapping = atom({ plugin: 'ripple', key: 'mapping' } as const, null)
-const view = atom({ plugin: 'ripple', key: 'view' } as const, { mode: null, selected: null })
+const view = atom({ plugin: 'ripple', key: 'view' } as const, { mode: null, selected: null, pan: null, top: null })
 
 /** The view the map opens in until the person switches: the plugin's `view` option. */
 let firstMode: RippleMode = 'graph'
-/** The view the pane last drew the map in: the tree, wherever the graph had no room. */
-let drawnMode: RippleMode = 'graph'
+/**
+ * What the pane last drew, which a key or a turn of the wheel goes on from:
+ * the view it drew the map in (the tree, wherever the graph had no room), the
+ * room it gave the map and where the map's window stood, the rows it gave the
+ * list and the symbol the list started from, and the row of the pane's body
+ * the list begins on.
+ */
+let shown: { mode: RippleMode; room: Room; pan: Pan; listRows: number; top: number; listAt: number } = {
+  mode: 'graph',
+  room: { columns: 0, rows: 0 },
+  pan: { x: 0, y: 0 },
+  listRows: 1,
+  top: 0,
+  listAt: 0,
+}
 /** Whether the changes have moved on since the map on hand was made, as last checked. */
 let isStale = false
 /** Whether a mapper is being started, between the check that none is at work and the record of the new one. */
@@ -290,24 +305,20 @@ const legend = ({ Box, Text }: Kit): RenderElement => (
   </Box>
 )
 
-/** The pane's keys under a map with nodes, in the order they are drawn. */
+/** The pane's keys under a map with symbols, in the order they are drawn. */
 const keysOf = (drawn: RippleMode): Array<{ key: string; label: string; isDim: boolean }> => [
   { key: 'h', label: '←', isDim: true },
   { key: 'j', label: '↓', isDim: true },
   { key: 'k', label: '↑', isDim: true },
   { key: 'l', label: '→', isDim: true },
+  { key: 'u', label: 'symbol ↑', isDim: true },
+  { key: 'd', label: 'symbol ↓', isDim: true },
   { key: 'n', label: 'next flagged', isDim: true },
   { key: 't', label: drawn === 'tree' ? 'graph view' : 'tree view', isDim: true },
   { key: ASK, label: 'ask Claude', isDim: false },
   { key: REMAP, label: 're-map', isDim: false },
   { key: WEB, label: 'web page', isDim: false },
 ]
-
-/** What the person is looking at, the view's mode settled. */
-const readView = async ($: EngineInterface): Promise<{ mode: RippleMode; selected: string | null }> => {
-  const seen = await read($, view)
-  return { mode: seen.mode ?? firstMode, selected: seen.selected }
-}
 
 /** Asks Claude, in the conversation, about the selected node. */
 const ask = async ($: EngineInterface): Promise<void> => {
@@ -318,19 +329,55 @@ const ask = async ($: EngineInterface): Promise<void> => {
   await $.prompt.submit({ text: askPrompt(node, held) })
 }
 
-/** Does what one key of the pane does: a Button's hotkey, or a key the map was handed. */
-const press = async ($: EngineInterface, key: string): Promise<void> => {
+const isPan = (value: unknown): value is Pan =>
+  typeof value === 'object' &&
+  value !== null &&
+  Number.isFinite((value as Pan).x) &&
+  Number.isFinite((value as Pan).y)
+
+/** Scrolls the map's window from where it was last drawn: by cells, or by turns of the wheel. */
+const scrollMap = async ($: EngineInterface, by: Pan | number): Promise<void> => {
+  const held = await read($, map)
+  if (held === null) return
+  const pan = VIEWS[shown.mode].scroll(filesOf(held), shown.room, shown.pan, by)
+  await update($, view, seen => ({ ...seen, pan }))
+}
+
+/** Scrolls the list under the map from where it was last drawn, by rows. */
+const scrollSymbols = async ($: EngineInterface, by: number): Promise<void> => {
+  const held = await read($, map)
+  if (held === null) return
+  const file = fileOf(filesOf(held), selectedOf(held, (await read($, view)).selected)?.id ?? null)
+  if (file === undefined) return
+  const top = scrollList(file, shown.listRows, shown.top, by)
+  await update($, view, seen => ({ ...seen, top }))
+}
+
+/**
+ * Does what one key of the pane does: a Button's hotkey, or a key the map or
+ * the list was handed. A move from file to file, and a jump to what is
+ * flagged, give the windows back to the selection; in the list, up and down
+ * go through the file's symbols.
+ */
+const press = async ($: EngineInterface, key: string, isInList = false): Promise<void> => {
   try {
     const held = await read($, map)
     if (held === null) return
+    const files = filesOf(held)
+    const at = selectedOf(held, (await read($, view)).selected)?.id ?? null
+    const file = fileOf(files, at)
     const move = MOVES[key]
-    if (move !== undefined) {
-      await update($, view, at => ({ ...at, selected: stepped(held, drawnMode, at.selected, move) }))
+    const listMove = LIST_MOVES[key] ?? (isInList && (move === 'up' || move === 'down') ? move : undefined)
+    if (listMove !== undefined) {
+      if (file !== undefined) await update($, view, seen => ({ ...seen, selected: stepInList(file, at, listMove), top: null }))
+    } else if (move !== undefined) {
+      const selected = VIEWS[shown.mode].step(files, at, move, shown.room, shown.pan)
+      await update($, view, seen => ({ ...seen, selected, pan: null, top: null }))
     } else if (key === 'n') {
-      await update($, view, at => ({ ...at, selected: nextFlagged(held, at.selected) }))
+      await update($, view, seen => ({ ...seen, selected: nextFlagged(held, at), pan: null, top: null }))
     } else if (key === 't') {
-      const other: RippleMode = drawnMode === 'tree' ? 'graph' : 'tree'
-      await update($, view, at => ({ ...at, mode: other }))
+      const other: RippleMode = shown.mode === 'tree' ? 'graph' : 'tree'
+      await update($, view, seen => ({ ...seen, mode: other, pan: null }))
     } else if (key === ASK) {
       await ask($)
     } else if (key === REMAP || key === WEB) {
@@ -428,7 +475,7 @@ export const register: Register = (on, options) => {
     }
     await update($, map, () => made)
     await update($, mapping, () => null)
-    await update($, view, seen => ({ ...seen, selected: null }))
+    await update($, view, seen => ({ ...seen, selected: null, pan: null, top: null }))
     isStale = false
     await persist($, made)
     await refreshStatus($)
@@ -453,16 +500,24 @@ export const register: Register = (on, options) => {
 
   on('ui.message', async ($, e, next) => {
     if (e.requestId !== PANE || typeof e.data !== 'object' || e.data === null) return next(e)
-    const { select, key } = e.data as { select?: unknown; key?: unknown }
-    if (typeof select === 'string') await update($, view, at => ({ ...at, selected: select }))
-    else if (typeof key === 'string') await press($, key)
+    const { select, scroll, key } = e.data as { select?: unknown; scroll?: unknown; key?: unknown }
+    if (typeof select === 'string') await update($, view, seen => ({ ...seen, selected: select, pan: null, top: null }))
+    else if (typeof key === 'string') await press($, key, e.element === 'list')
+    else if (isPan(scroll)) await scrollMap($, scroll)
     return {}
   })
+
+  on('ui.scroll', { component: 'Pane', requestId: 'ripple' }, async ($, e, next) => {
+    if (e.origin.kind !== 'person' || e.pointer === undefined || e.contentRows > e.bodyRows) return next(e)
+    if (e.pointer.row < shown.listAt) await scrollMap($, e.by)
+    else await scrollSymbols($, e.by)
+    return {}
+  }).catch(($, e, next) => next(e))
 
   on('ui.render', { component: 'Pane', requestId: 'ripple' }, async ($, e) => {
     const held = await read($, map)
     const at = await read($, mapping)
-    const { mode, selected } = await readView($)
+    const seen = await read($, view)
     const columns = Math.max(MIN_COLUMNS, e.props.bodyColumns)
 
     const kit: Kit = $.ui.resolve(e)
@@ -520,22 +575,62 @@ export const register: Register = (on, options) => {
     }
 
     const { Client, Link } = $.ui.resolve(e)
+    const files = hasNodes ? filesOf(held) : undefined
+    const node = hasNodes ? selectedOf(held, seen.selected) : undefined
+    const file = files === undefined ? undefined : fileOf(files, node?.id ?? null)
     const plan = planOf(
       { columns, rows: e.props.scroll.bodyRows },
       {
         summary: held?.summary ?? '',
         hasNotice: notice !== undefined,
         legend: LEGEND_LABELS,
-        keys: keysOf(mode).map(one => one.label),
+        keys: keysOf(seen.mode ?? firstMode).map(one => one.label),
+        symbols: Math.max(1, ...(files?.files ?? []).map(one => one.symbols.length)),
       },
     )
     const room = { columns, rows: plan.mapRows }
     const gap = plan.isCompact ? 0 : 1
-    drawnMode = modeIn(mode, room)
-    const keys = keysOf(drawnMode).filter(one => one.key !== 't' || modeIn('graph', room) === 'graph')
-    const node = hasNodes ? selectedOf(held, selected) : undefined
-    const detail = node === undefined || !hasNodes ? undefined : detailOf(held, node)
+    const mode = modeIn(seen.mode ?? firstMode, room)
+    const keys = keysOf(mode).filter(one => one.key !== 't' || modeIn('graph', room) === 'graph')
     const root = await rootOf($)
+
+    let drawn: RenderElement | false = false
+    if (files !== undefined && file !== undefined && node !== undefined && hasNodes) {
+      const pan = seen.pan ?? VIEWS[mode].show(files, node.id, room, shown.pan)
+      const top = seen.top ?? showInList(file, node.id, plan.listRows, shown.top)
+      const picture = VIEWS[mode].draw(files, node.id, room, pan)
+      shown = { mode, room, pan, listRows: plan.listRows, top, listAt: plan.mapTop + picture.rows.length + gap }
+      drawn = (
+        <Box flexDirection="column" marginTop={gap}>
+          <Client key="map" module="./pane.tsx" props={picture} />
+          <Box flexDirection="column" marginTop={gap}>
+            <Text wrap="truncate-end">
+              <Text bold>{`▸ ${file.path}`}</Text>
+              <Text dimColor>{` · ${listSays(file, plan.listRows, top)} · `}</Text>
+              <Link href={`file://${root}/${file.path}`} label="open" />
+            </Text>
+            <Box flexDirection="column" height={plan.listRows + plan.detailRows} overflow="hidden">
+              <Client
+                key="list"
+                module="./pane.tsx"
+                props={drawList(file, node.id, { columns, rows: plan.listRows }, top)}
+              />
+              {!plan.isCompact && (
+                <Text wrap="truncate-end">
+                  <Text bold>{node.name}</Text>
+                  <Text dimColor>{` · ${factsOf(held, node)}`}</Text>
+                </Text>
+              )}
+              {node.reason !== undefined && (
+                <Text wrap={plan.isCompact ? 'truncate-end' : 'wrap'} {...styleOf(markOf(node).paint)}>
+                  {node.reason}
+                </Text>
+              )}
+            </Box>
+          </Box>
+        </Box>
+      )
+    }
     return (
       <Box flexDirection="column">
         <Text bold wrap="truncate-end">
@@ -549,34 +644,7 @@ export const register: Register = (on, options) => {
         {!plan.isCompact && held?.summary !== undefined && <Text wrap="wrap">{held.summary}</Text>}
         {noticeLine}
         {!plan.isCompact && hasNodes && legend(kit)}
-        {hasNodes && (
-          <Box marginTop={gap}>
-            <Client key="map" module="./pane.tsx" props={drawView(held, mode, selected, room)} />
-          </Box>
-        )}
-        {detail !== undefined && node !== undefined && (
-          <Box flexDirection="column" marginTop={gap}>
-            <Text wrap="truncate-end">
-              <Text bold>{`▸ ${detail.name}`}</Text>
-              <Text dimColor>{` · ${detail.facts} · `}</Text>
-              <Link href={`file://${root}/${node.file}`} label={detail.where} />
-            </Text>
-            <Box height={plan.detail.verdict} overflow="hidden">
-              {detail.verdict !== undefined && (
-                <Text wrap={plan.detail.verdict === 1 ? 'truncate-end' : 'wrap'} {...styleOf(detail.verdict.paint)}>
-                  {detail.verdict.text}
-                </Text>
-              )}
-            </Box>
-            {plan.detail.links > 0 && (
-              <Box height={plan.detail.links} overflow="hidden">
-                <Text wrap="truncate-end" dimColor>
-                  {detail.links}
-                </Text>
-              </Box>
-            )}
-          </Box>
-        )}
+        {drawn}
         {held !== null && (
           <Box flexDirection="row" flexWrap="wrap" columnGap={2} marginTop={gap}>
             {hasNodes ? keys.map(one => button(one.key, one.label, one.isDim)) : button(REMAP, 're-map')}

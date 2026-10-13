@@ -1,131 +1,157 @@
-import type { RippleNode, RippleReport } from '../types'
-import { locOf, markOf, note, windowOf, wordsOf } from './draw'
-import type { Drawing, Hit, Move, Room, Span } from './draw'
-import { clip } from './map'
+import { beyondRow, cutRow, markOf, reveal } from './draw'
+import type { Drawing, Hit, Move, Pan, Room, Span, View } from './draw'
+import { fileOf, isLinked, symbolIn } from './files'
+import type { FileMap, MapFile } from './files'
 
-// The tree view: one row a node, each changed symbol with its dependents
-// hanging under it and then what it uses.
+// The tree view: a row a file, each changed file with the files that use it
+// hanging under it and then the files it uses, and after each path the
+// symbols the map has in the file.
 
-/** The most characters of a name a row shows. */
-const NAME_CHARS = 32
-/** How far the words after a location are pushed right to line up; a longer location pushes its own. */
-const WHERE_CHARS = 28
+/** How far the symbols after a path are pushed right to line up; a longer path pushes its own. */
+const PATH_COLUMNS = 44
+/** How many rows past the selected one the window keeps in view. */
+const MARGIN = 1
+/** How many rows one turn of the wheel scrolls. */
+const WHEEL = 2
 
 export type TreeRow = {
-  node: RippleNode
+  file: MapFile
   /** The guides before the mark: `├─ `, `│  └─ `. */
   lead: string
-  /** The id of the row this one hangs under; null for a root. */
-  parent: string | null
+  /** The file this one hangs under; null for a root. */
+  parent: MapFile | null
 }
 
 /**
- * The tree's rows, top to bottom. A node hangs under the first node, one
+ * The tree's rows, top to bottom. A file hangs under the first file, one
  * step nearer the change, that it is linked to; one linked to none is a root,
- * after the changed symbols and nearest the change first.
+ * after the changed files and nearest the change first.
  */
-export function treeOf(report: RippleReport): TreeRow[] {
-  const placed = new Set<string>()
+export function treeOf(map: FileMap): TreeRow[] {
+  const placed = new Set<MapFile>()
   const rows: TreeRow[] = []
-  const childrenOf = (parent: RippleNode): RippleNode[] =>
-    report.nodes.filter(node => {
-      if (placed.has(node.id) || node.role === 'changed' || node.depth !== parent.depth + 1) return false
-      if (parent.role !== 'changed' && parent.role !== node.role) return false
-      return report.edges.some(edge =>
-        node.role === 'dependent'
-          ? edge.from === node.id && edge.to === parent.id
-          : edge.from === parent.id && edge.to === node.id,
-      )
+  const childrenOf = (parent: MapFile): MapFile[] =>
+    map.files.filter(file => {
+      if (placed.has(file) || file.role === 'changed' || file.depth !== parent.depth + 1) return false
+      if (parent.role !== 'changed' && parent.role !== file.role) return false
+      return file.role === 'dependent' ? isLinked(map, file, parent) : isLinked(map, parent, file)
     })
-  const walk = (node: RippleNode, parent: string | null, lead: string, rest: string): void => {
-    placed.add(node.id)
-    rows.push({ node, lead, parent })
-    const linked = childrenOf(node)
+  const walk = (file: MapFile, parent: MapFile | null, lead: string, rest: string): void => {
+    placed.add(file)
+    rows.push({ file, lead, parent })
+    const linked = childrenOf(file)
     const children = [
       ...linked.filter(child => child.role === 'dependent'),
       ...linked.filter(child => child.role === 'dependency'),
     ]
-    for (const child of children) placed.add(child.id)
+    for (const child of children) placed.add(child)
     children.forEach((child, index) => {
       const isLast = index === children.length - 1
-      walk(child, node.id, rest + (isLast ? '└─ ' : '├─ '), rest + (isLast ? '   ' : '│  '))
+      walk(child, file, rest + (isLast ? '└─ ' : '├─ '), rest + (isLast ? '   ' : '│  '))
     })
   }
-  for (const node of report.nodes.filter(one => one.role === 'changed')) walk(node, null, '', '')
-  for (const node of [...report.nodes].sort((a, b) => a.depth - b.depth)) {
-    if (!placed.has(node.id)) walk(node, null, '', '')
+  for (const file of map.files.filter(one => one.role === 'changed')) walk(file, null, '', '')
+  for (const file of [...map.files].sort((a, b) => a.depth - b.depth)) {
+    if (!placed.has(file)) walk(file, null, '', '')
   }
   return rows
 }
 
-/**
- * The run of rows that fits down `rows` around row `at`: as many as do,
- * leaving a row for each line that counts a cut.
- */
-function rowsIn(total: number, at: number, rows: number): [start: number, end: number] {
-  for (let count = Math.min(total, rows); count > 1; count -= 1) {
-    const [start, end] = windowOf(total, count, at, at)
-    if (count + (start > 0 ? 1 : 0) + (end < total ? 1 : 0) <= rows) return [start, end]
-  }
-  return windowOf(total, 1, at, at)
+/** How many of the tree's rows a room shows: all of them, or what is left over the row that counts the rest. */
+function shownIn(total: number, room: Room): number {
+  return total <= room.rows ? total : Math.max(1, room.rows - 1)
 }
 
-/** Draws the map as a tree in `room`, around the selected node. */
-export function drawTree(report: RippleReport, selected: string | null, room: Room): Drawing {
-  const tree = treeOf(report)
-  const at = Math.max(
-    0,
-    tree.findIndex(row => row.node.id === selected),
-  )
-  const [start, end] = rowsIn(tree.length, at, room.rows)
-  const headColumns = Math.max(0, ...tree.map(row => row.lead.length + 2 + Math.min(row.node.name.length, NAME_CHARS)))
-  const whereColumns = Math.min(WHERE_CHARS, Math.max(0, ...tree.map(row => locOf(row.node).length)))
+const startOf = (total: number, shown: number, pan: Pan): number => Math.min(Math.max(pan.y, 0), total - shown)
+
+/**
+ * Draws the map as a tree through a window at `pan`. A row that runs past
+ * the room ends in an ellipsis, and a tree taller than the room has a row
+ * under it that counts the files out of view.
+ */
+function draw(map: FileMap, selected: string | null, room: Room, pan: Pan): Drawing {
+  const tree = treeOf(map)
+  const picked = fileOf(map, selected)
+  const shown = shownIn(tree.length, room)
+  const start = startOf(tree.length, shown, pan)
+  const headOf = (row: TreeRow): number => row.lead.length + 2 + row.file.path.length
+  const pathColumns = Math.min(PATH_COLUMNS, Math.max(0, ...tree.map(headOf)))
 
   const rows: Span[][] = []
   const hits: Hit[] = []
-  const cut = (text: string, into: TreeRow): void => {
-    hits.push({ id: into.node.id, x: 0, y: rows.length, width: room.columns, height: 1 })
-    rows.push(note(text))
-  }
-  const above = tree[start - 1]
-  if (above !== undefined) cut(`↑ ${start} more above`, above)
-  for (const row of tree.slice(start, end)) {
-    const { node } = row
-    const mark = markOf(node)
-    const name = clip(node.name, NAME_CHARS)
-    const words = wordsOf(node).join(' · ')
+  for (const row of tree.slice(start, start + shown)) {
+    const { file } = row
+    const mark = markOf(file)
+    const folder = file.path.slice(0, file.path.lastIndexOf('/') + 1)
+    const symbol = symbolIn(file, selected)
     const spans: Span[] = [
       { text: row.lead, paint: 'dim' },
+      { text: `${mark.glyph} `, paint: mark.paint },
+      { text: folder, paint: 'dim' },
       {
-        text: `${mark.glyph} ${name}`,
+        text: file.path.slice(folder.length),
         paint: mark.paint,
-        ...(node.id === selected ? { isBold: true as const, isInverse: true as const } : {}),
+        ...(file === picked ? { isBold: true as const, isInverse: true as const } : {}),
       },
-      { text: `${' '.repeat(headColumns - row.lead.length - 2 - name.length + 2)}${locOf(node)}`, paint: 'dim' },
+      {
+        text: `${' '.repeat(Math.max(0, pathColumns - headOf(row)) + 2)}${file.symbols.map(one => one.name).join(', ')}`,
+        paint: 'dim',
+      },
     ]
-    if (words !== '') {
-      const gap = ' '.repeat(Math.max(0, whereColumns - locOf(node).length) + 2)
-      spans.push({ text: `${gap}${words}`, paint: mark.paint === 'plain' ? 'dim' : mark.paint })
-    }
-    hits.push({ id: node.id, x: 0, y: rows.length, width: room.columns, height: 1 })
-    rows.push(spans)
+    if (symbol !== undefined) hits.push({ id: symbol.id, x: 0, y: rows.length, width: room.columns, height: 1 })
+    rows.push(cutRow(spans, room.columns))
   }
-  const below = tree[end]
-  if (below !== undefined) cut(`↓ ${tree.length - end} more below`, below)
-  return { rows, hits }
+  if (shown === tree.length) return { rows, hits }
+  const beyond = beyondRow(
+    { left: 0, right: 0, above: start, below: tree.length - start - shown },
+    room.columns,
+    { x: 0, y: shown },
+    rows.length,
+  )
+  return { rows: [...rows, beyond.row], hits: [...hits, ...beyond.hits] }
+}
+
+/** Where the window stands to show the selected file's row and the rows next to it: as near `from` as it can. */
+function show(map: FileMap, selected: string | null, room: Room, from: Pan): Pan {
+  const tree = treeOf(map)
+  const picked = fileOf(map, selected)
+  const shown = shownIn(tree.length, room)
+  const at = Math.max(
+    0,
+    tree.findIndex(row => row.file === picked),
+  )
+  const margin = shown > 2 * MARGIN ? MARGIN : 0
+  return { x: 0, y: reveal(startOf(tree.length, shown, from), at - margin, at + 1 + margin, shown, tree.length) }
+}
+
+/** Where the window stands after it is scrolled from `from`: by rows, or by turns of the wheel. */
+function scroll(map: FileMap, room: Room, from: Pan, by: Pan | number): Pan {
+  const total = treeOf(map).length
+  const shown = shownIn(total, room)
+  const rows = typeof by === 'number' ? by * WHEEL : by.y
+  return { x: 0, y: startOf(total, shown, { x: 0, y: startOf(total, shown, from) + rows }) }
 }
 
 /**
- * The node a move from `selected` lands on: up and down the rows, left to
- * the node a row hangs under, right to the first that hangs under it.
+ * The symbol a move from the selected file lands on, the first of the file
+ * it reaches: up and down the rows, left to the file a row hangs under,
+ * right to the first that hangs under it.
  */
-export function stepInTree(report: RippleReport, selected: string, move: Move): string {
-  const tree = treeOf(report)
-  const at = tree.findIndex(row => row.node.id === selected)
+function step(map: FileMap, selected: string | null, move: Move): string | null {
+  const tree = treeOf(map)
+  const picked = fileOf(map, selected)
+  const at = tree.findIndex(row => row.file === picked)
   const row = tree[at]
   if (row === undefined) return selected
-  if (move === 'up') return tree[at - 1]?.node.id ?? selected
-  if (move === 'down') return tree[at + 1]?.node.id ?? selected
-  if (move === 'left') return row.parent ?? selected
-  return tree.find(other => other.parent === selected)?.node.id ?? selected
+  const to =
+    move === 'up'
+      ? tree[at - 1]?.file
+      : move === 'down'
+        ? tree[at + 1]?.file
+        : move === 'left'
+          ? (row.parent ?? undefined)
+          : tree.find(other => other.parent === row.file)?.file
+  return (to === undefined ? undefined : symbolIn(to, null)?.id) ?? selected
 }
+
+export const treeView: View = { draw, show, scroll, step }

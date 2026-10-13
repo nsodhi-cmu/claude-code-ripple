@@ -8,30 +8,32 @@ uncommitted changes · via LSP
 Two callers of formatPrice no longer compile, and receipts may show the wrong currency.
 ◆ changed  ● breaks  ▲ review  ○ ok  → uses
 
-       ┌────────────────┐  ┌───────────────┐
-       │ ○ CheckoutPage │  │ ○ InvoicePage │
-       └────────┬───────┘  └───────┬───────┘
-                │                  │
-                ▼                  ▼
-        ╔══════════════╗  ┌─────────────────┐  ┌──────────────┐  ┌────────────────┐
-        ║ ● renderCart ║  │ ● renderInvoice │  │ ○ priceLabel │  │ ▲ emailReceipt │
-        ╚═══════╤══════╝  └────────┬────────┘  └───────┬──────┘  └────────┬───────┘
-                └──────────────────┴─────────┬─────────┴──────────────────┘
-                                             ▼
-                                     ┌───────────────┐
-                                     │ ◆ formatPrice │
-                                     └───────┬───────┘
-                                    ┌────────┴─────────┐
-                                    ▼                  ▼
-                             ┌────────────┐  ┌──────────────────┐
-                             │ → toFixed2 │  │ → currencySymbol │
-                             └────────────┘  └──────────────────┘
+           ┌───────────────┐  ┌────────────────────┐
+           │ ○ checkout.ts │  │ ○ pages/invoice.ts │
+           └────────┬──────┘  └────────┬───────────┘
+                    │                  │
+                    ▼                  ▼
+              ╔═══════════╗  ┌──────────────────┐  ┌─────────┐  ┌────────────┐
+              ║ ● cart.ts ║  │ ● src/invoice.ts │  │ ○ ui.ts │  │ ▲ email.ts │
+              ╚═════╤═════╝  └────────────────┬─┘  └────┬────┘  └──────┬─────┘
+                    └─────────────────────────┼─────────┴──────────────┘
+                                              ▼
+                                       ┌────────────┐
+                                       │ ◆ price.ts │
+                                       └──────┬─────┘
+                                              │
+                                              ▼
+                                      ┌───────────────┐
+                                      │ → money.ts  2 │
+                                      └───────────────┘
 
-▸ renderCart · function · untested · src/cart.ts:14
-breaks: passes 1 argument; formatPrice now takes 2
-uses formatPrice · used by CheckoutPage
+▸ src/cart.ts · 1 symbol · open
+  ● renderCart  :14  breaks · untested
+renderCart · function · uses formatPrice · used by CheckoutPage
+passes 1 argument; formatPrice now takes 2
 
-h: ←  j: ↓  k: ↑  l: →  n: next flagged  t: tree view  1: ask Claude  2: re-map  3: web page
+h: ←  j: ↓  k: ↑  l: →  u: symbol ↑  d: symbol ↓  n: next flagged  t: tree view
+1: ask Claude  2: re-map  3: web page
 ```
 
 A diff shows what you changed and nothing of what it reaches. Rename a struct, add a parameter, or loosen a check, and code in files you never opened breaks, or quietly starts doing something else. Ripple maps that code.
@@ -39,7 +41,7 @@ A diff shows what you changed and nothing of what it reaches. Rename a struct, a
 - **The diff is read from git**, so a change counts whether Claude made it, a script did, or you did.
 - **The map is of symbols**: functions, types, fields, and constants. A Claude agent does the tracing with the tools the repository already has, so no language needs setting up.
 - **The mapper works in the background**, apart from your conversation. It has no tool that edits files, and a command that would need your permission is refused, not put to you.
-- **One node of the map is selected**: its edges are lit, and the pane says why it is flagged.
+- **The map is drawn by file**: a box a file, and under the map the symbols it holds in the selected file, each with its line and why it is flagged.
 
 ## Installing
 
@@ -72,32 +74,68 @@ Mapping runs in the background, so you can keep working while it does. Run `/rip
 
 ### The Map
 
-The pane opens beside the transcript where the terminal is wide enough for Claude Code to dock it, and above the prompt otherwise. Dependents sit above the change and what the change uses sits below it. One node is selected: its box is double-framed, its edges are lit, and the lines under the map say what it is, where it is, why it is flagged, and what it is linked to.
+The pane opens beside the transcript where the terminal is wide enough for Claude Code to dock it, and above the prompt otherwise.
+
+Each box is a file, marked as the worst of its symbols is, with a count when it holds more than one. The files that use the change sit above it, and the files it uses below. One file is selected: its box is double-framed, and its links and the files they reach are lit. Under the map is the list of that file's symbols, in the order they stand in the file, each with its line. One of them is selected too, and the lines under the list say what it is, what it is linked to, and the mapper's reason for flagging it.
 
 | Key | What it does |
 | :- | :- |
-| `h` `j` `k` `l` | Move the selection left, down, up, and right. |
-| `n` | Go to the next flagged node. |
+| `h` `j` `k` `l` | Move from file to file: left, down, up, and right. |
+| `u` `d` | Move up and down the selected file's symbols. |
+| `n` | Go to the next flagged symbol, in whatever file it is. |
 | `t` | Switch between the graph and the tree. |
-| `1` | Ask Claude, in the conversation, about the selected node. It is asked to explain and to edit nothing. |
+| `1` | Ask Claude, in the conversation, about the selected symbol. It is asked to explain and to edit nothing. |
 | `2` | Map again: the same scope and focus, as the changes now stand. |
 | `3` | The same as `/ripple web`. |
 
-The keys work while the pane has the keyboard, which it asks for when you open it. `ctrl+x tab` moves the keyboard between the pane and the prompt, and typing anything else goes back to the prompt. The keys that start something are digits, so the first letter of a prompt never sets one off. A click on a box selects it, and once the map has been clicked the arrow keys move the selection too.
+The keys work while the pane has the keyboard, which it asks for when you open it. `ctrl+x tab` moves the keyboard between the pane and the prompt, and typing anything else goes back to the prompt. The keys that start something are digits, so the first letter of a prompt never sets one off.
 
-A layer too wide for the pane keeps the selected node, what it is linked to, and what is flagged, and folds the rest into a `+3 more` box. A map too tall keeps the layers around the selection. Where there is no room for a graph at all, the pane draws the tree:
+The mouse works without the keyboard. A click on a box selects its file, and a click on a row of the list selects that symbol. The wheel scrolls whichever of the two it is over. Once the map or the list has been clicked, the arrow keys move through it as the letters do.
+
+#### A Map Larger Than The Pane
+
+The files of a layer keep one order, whatever is selected. A layer longer than the pane runs off its edge, a box the edge cuts ends in an ellipsis, and a row under the map counts the files out of view on each side:
 
 ```
-◆ formatPrice         src/price.ts:1           signature changed
-├─ ● renderCart       src/cart.ts:14           breaks · untested
-│  └─ ○ CheckoutPage  src/pages/checkout.ts:5
-├─ ● renderInvoice    src/invoice.ts:11        breaks
-│  └─ ○ InvoicePage   src/pages/invoice.ts:5
-├─ ○ priceLabel       src/ui.ts:4
-├─ ▲ emailReceipt     src/email.ts:6           review
-├─ → toFixed2         src/price.ts:9
-└─ → currencySymbol   src/price.ts:13
+ ┌───────────────┐  ┌────────────────────┐
+ │ ○ checkout.ts │  │ ○ pages/invoice.ts │
+ └───────┬───────┘  └──────────┬─────────┘
+─────────┘     ┌───────────────┘
+               ▼
+──┐  ┌──────────────────┐  ╔═════════╗  ┌───
+… │  │ ● src/invoice.ts │  ║ ○ ui.ts ║  │ ▲…
+──┘  └────────────────┬─┘  ╚════╤════╝  └───
+──────────────────────┼─────────┴───────────
+                      ▼
+               ┌────────────┐
+               │ ◆ price.ts │
+               └──────┬─────┘
+                      │
+                      ▼
+              ┌───────────────┐
+              │ → money.ts  2 │
+              └───────────────┘
+← 1 more                            1 more →
 ```
+
+The map scrolls when the selection moves out of view, and no farther than it takes to show the selected file and the start of the one past it. The wheel scrolls it without moving the selection, and so does a click on one of the counts. A layer that fits the pane stays where it is while a longer one slides, so the change stays in view as you go along the files that use it.
+
+A list longer than its rows scrolls the same way: the line over it says which symbols it shows, and its first and last rows are marked where there are more above and below.
+
+Where there is no room for a graph at all, the pane draws the tree, a row a file, with the symbols of each after its path:
+
+```
+◆ src/price.ts                 formatPrice
+├─ ● src/cart.ts               renderCart
+│  └─ ○ src/pages/checkout.ts  CheckoutPage
+├─ ● src/invoice.ts            renderInvoice
+│  └─ ○ src/pages/invoice.ts   InvoicePage
+├─ ○ src/ui.ts                 priceLabel
+├─ ▲ src/email.ts              emailReceipt
+└─ → src/money.ts              currencySymbol, toFixed2
+```
+
+In the tree `j` and `k` go down and up the rows, `h` goes to the file a row hangs under, and `l` to the first that hangs under it.
 
 To open on the tree every time, set **Default view** to `tree` in `/config`, or run `/plugin configure ripple@claude-code-ripple`.
 
@@ -115,6 +153,8 @@ Ripple runs no tests and no analysis of its own. The mapper reads the code and j
 | `○` **ok** | A dependent the change does not affect. |
 | `→` **uses** | A symbol a changed one uses. It is there for context and is not judged. |
 | **untested** | No test file mentions the symbol by name. Nothing is run: it says a test may be missing, not that one fails. |
+
+A file is marked for what it holds: `◆` when any symbol in it changed, and otherwise as the worst of its symbols is.
 
 The line under the header says how far to trust a map: `via LSP` and `via type checker` come from the language's own tools, `via text search` from a search the mapper filtered by reading each hit.
 
@@ -165,7 +205,7 @@ It makes no network requests of its own.
 - A map is a reading of the code, not a proof. Uses through dynamic dispatch, reflection, or strings can be missed, most of all when the map is `via text search`.
 - A mapping is one agent run, which costs what any subagent costs. It runs only when you ask.
 - A map holds at most 60 symbols. Past that the mapper keeps the changed symbols, then what breaks, then what needs review, then the nearest dependents.
-- The graph draws the edges between neighboring layers. Any other link of a node is in the lines under the map when the node is selected.
+- The graph draws the links between neighboring layers. Two files linked within a layer, or across more than one, are lit when either is selected, with no line drawn between them.
 - A name is drawn one cell a character, so a name written in characters two cells wide pushes its row out of line.
 - Ripple needs git and at least one commit, and maps one repository at a time.
 

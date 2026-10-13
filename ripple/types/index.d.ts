@@ -58,12 +58,17 @@ export type RippleMap = RippleReport & RippleOrigin
 
 export type RippleMode = 'graph' | 'tree'
 
-/**
- * What the person is looking at: which view, and the id of the node selected
- * in it. `mode` is null until they switch views: until then the plugin's
- * `view` option decides.
- */
-export type RippleView = { mode: RippleMode | null; selected: string | null }
+/** What the person is looking at. */
+export type RippleView = {
+  /** Which view of the map; null until they switch views: until then the plugin's `view` option decides. */
+  mode: RippleMode | null
+  /** The id of the selected symbol, whose file is the one selected on the map. */
+  selected: string | null
+  /** Where they scrolled the map's window to, in cells; null while the window follows the selection. */
+  pan: { x: number; y: number } | null
+  /** The symbol they scrolled the list under the map to start from; null while the list follows the selection. */
+  top: number | null
+}
 
 declare module 'claude-code' {
   interface PluginState {

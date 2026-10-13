@@ -5,8 +5,10 @@ import type { AgentInfo, On, RenderPropsOf } from 'claude-code'
 import { SHOP_MAP, SHOP_REPORT } from './fixture'
 import { HEAD, readChanges } from '../hooks/changes'
 import { rowText } from '../hooks/draw'
+import type { Hit } from '../hooks/draw'
+import { filesOf } from '../hooks/files'
 import { NO_ASKING } from '../hooks/mapper'
-import { drawView } from '../hooks/view'
+import { VIEWS } from '../hooks/view'
 
 // The whole loop through the engine: /ripple reads the changes from git and
 // starts a mapper, the mapper's report becomes the map, and the pane draws it.
@@ -235,9 +237,9 @@ const paneText = async ($: Engine): Promise<string[]> => {
 
 type Pane = Awaited<ReturnType<typeof mountPane>>
 
-/** The rows the map's surface module drew. */
-const mapRows = async (pane: Pane): Promise<string[]> => {
-  const drawn = (await pane.drawn({ in: 'map' })) as { children?: Array<{ children?: unknown[] }> }
+/** The rows one of the pane's two surface modules drew: the map's, or the list's under it. */
+const rowsOf = async (pane: Pane, client: 'map' | 'list'): Promise<string[]> => {
+  const drawn = (await pane.drawn({ in: client })) as { children?: Array<{ children?: unknown[] }> }
   return (drawn.children ?? []).map(row =>
     (row.children ?? [])
       .map(span => (typeof span === 'string' ? span : ((span as { children?: string[] }).children ?? []).join('')))
@@ -245,16 +247,28 @@ const mapRows = async (pane: Pane): Promise<string[]> => {
   )
 }
 
-/** The name the detail under the map leads with: the selected node's. */
-const selectedName = async (pane: Pane): Promise<string | undefined> =>
+const mapRows = (pane: Pane): Promise<string[]> => rowsOf(pane, 'map')
+
+/** The path the list under the map is headed with: the selected file's. */
+const selectedFile = async (pane: Pane): Promise<string | undefined> =>
   (await pane.find({ type: 'Text', text: /^▸ \S+$/ }))?.text.slice(2)
 
-/** A room as wide as the pane and taller than the shop's graph, which the pane's own room for the map is too. */
-const ROOM = { columns: PANE.bodyColumns, rows: PANE.scroll.bodyRows }
-const hitOf = (name: string) => {
-  const node = SHOP_MAP.nodes.find(one => one.name === name)
-  const hit = drawView(SHOP_MAP, 'graph', null, ROOM).hits.find(one => one.id === node?.id)
-  if (hit === undefined) throw new Error(`${name} is not drawn`)
+/** The name the list marks: the selected symbol's. */
+const selectedSymbol = async (pane: Pane): Promise<string | undefined> =>
+  (await pane.findAll({ in: 'list', type: 'Text' })).find(found => found.props.inverse === true)?.text
+
+const SHOP = filesOf(SHOP_MAP)
+const ORIGIN = { x: 0, y: 0 }
+const id = (name: string): string => SHOP_MAP.nodes.find(one => one.name === name)?.id ?? ''
+
+/** The shop's graph as the pane first draws it in a room `columns` wide and tall enough for all of it. */
+const graphIn = (columns: number) => VIEWS.graph.draw(SHOP, id('renderCart'), { columns, rows: 40 }, ORIGIN)
+
+/** Where the box of the file that holds symbol `name` is in the pane's graph. */
+const boxOf = (name: string): Hit => {
+  const file = SHOP.files.find(one => one.symbols.some(symbol => symbol.name === name))
+  const hit = graphIn(PANE.bodyColumns).hits.find(one => 'id' in one && file?.symbols.some(symbol => symbol.id === one.id))
+  if (hit === undefined) throw new Error(`the file of ${name} is not drawn`)
   return hit
 }
 
@@ -340,7 +354,7 @@ test('/ripple starts a mapper on the uncommitted diff, and its report becomes th
   expect(drawn).toContain('uncommitted changes · via LSP · focus: formatPrice')
   expect(drawn).toContain(SHOP_MAP.summary)
   expect(drawn).not.toContain('◌ Mapping…')
-  expect(drawn).toContain('▸ renderCart')
+  expect(drawn).toContain('▸ src/cart.ts')
 
   const toasts = seen.toasts.length
   await turnEnds($, 'mapper-1')
@@ -570,11 +584,11 @@ test('the terminal draws the graph through its surface module, and the other sur
   await mapped($, on)
 
   const terminal = await mountPane($)
-  expect(await mapRows(terminal)).toEqual(drawView(SHOP_MAP, 'graph', null, ROOM).rows.map(rowText))
-  expect(await terminal.find({ in: 'map', type: 'Text', text: /^● renderCart$/ })).toMatchObject({
+  expect(await mapRows(terminal)).toEqual(graphIn(PANE.bodyColumns).rows.map(rowText))
+  expect(await terminal.find({ in: 'map', type: 'Text', text: /^● cart\.ts$/ })).toMatchObject({
     props: { color: 'error', bold: true, inverse: true },
   })
-  expect(await terminal.find({ in: 'map', type: 'Text', text: /^◆ formatPrice$/ })).toMatchObject({
+  expect(await terminal.find({ in: 'map', type: 'Text', text: /^◆ price\.ts$/ })).toMatchObject({
     props: { color: 'suggestion' },
   })
   expect(await terminal.find({ type: 'Svg' })).toBeUndefined()
@@ -591,57 +605,117 @@ test('the terminal draws the graph through its surface module, and the other sur
   }
 })
 
-test('the detail under the map is of the selected node, and links to its file', async ($, on) => {
+test('under the map the pane lists the selected file\'s symbols with their lines, and says more of the selected one', async ($, on) => {
   await mapped($, on)
   const pane = await mountPane($)
-  expect(await selectedName(pane)).toBe('renderCart')
+  expect(await selectedFile(pane)).toBe('src/cart.ts')
+  expect(await pane.find({ type: 'Text', text: ' · 1 symbol · ' })).toBeDefined()
   expect(await pane.find({ type: 'Link' })).toMatchObject({
-    props: { href: 'file:///repo/shop/src/cart.ts', label: 'src/cart.ts:14' },
+    props: { href: 'file:///repo/shop/src/cart.ts', label: 'open' },
   })
-  expect(await pane.find({ type: 'Text', text: 'breaks: passes 1 argument; formatPrice now takes 2' })).toMatchObject({
-    props: { color: 'error' },
+  expect(await rowsOf(pane, 'list')).toEqual(['  ● renderCart  :14  breaks · untested'])
+  expect(await pane.find({ type: 'Text', text: ' · function · uses formatPrice · used by CheckoutPage' })).toBeDefined()
+  expect(await pane.find({ type: 'Text', text: 'passes 1 argument; formatPrice now takes 2' })).toMatchObject({
+    props: { color: 'error', wrap: 'wrap' },
   })
-  expect(await pane.find({ type: 'Text', text: 'uses formatPrice · used by CheckoutPage' })).toBeDefined()
   await pane.unmount()
 })
 
-test('the keys under the map move the selection, and next flagged goes round what is at risk', async ($, on) => {
+test('the keys under the map move from file to file, and next flagged goes round what is at risk', async ($, on) => {
   await mapped($, on)
   const pane = await mountPane($)
   const after = async (key: string) => {
     await pane.press({ key })
-    return selectedName(pane)
+    return selectedFile(pane)
   }
-  expect(await after('l')).toBe('renderInvoice')
-  expect(await after('k')).toBe('InvoicePage')
-  expect(await after('h')).toBe('CheckoutPage')
-  expect(await after('j')).toBe('renderCart')
-  expect(await after('j')).toBe('formatPrice')
-  expect(await after('n')).toBe('renderCart')
-  expect(await after('n')).toBe('renderInvoice')
-  expect(await after('n')).toBe('emailReceipt')
-  expect(await pane.find({ in: 'map', type: 'Text', text: /^▲ emailReceipt$/ })).toMatchObject({
+  expect(await after('l')).toBe('src/invoice.ts')
+  expect(await after('k')).toBe('src/pages/invoice.ts')
+  expect(await after('h')).toBe('src/pages/checkout.ts')
+  expect(await after('j')).toBe('src/cart.ts')
+  expect(await after('j')).toBe('src/price.ts')
+  expect(await after('n')).toBe('src/cart.ts')
+  expect(await after('n')).toBe('src/invoice.ts')
+  expect(await after('n')).toBe('src/email.ts')
+  expect(await pane.find({ in: 'map', type: 'Text', text: /^▲ email\.ts$/ })).toMatchObject({
     props: { inverse: true },
   })
+  expect(await selectedSymbol(pane)).toBe('emailReceipt')
   await pane.unmount()
 })
 
-test('a click on a box selects it, and the arrow keys then move from there', async ($, on) => {
+test('u and d move through the selected file\'s symbols and leave the file selected', async ($, on) => {
   await mapped($, on)
   const pane = await mountPane($)
-  const box = hitOf('emailReceipt')
-  await pane.pointer({ type: 'down', x: box.x + 1, y: box.y + 1, button: 'left' })
-  expect(await selectedName(pane)).toBe('emailReceipt')
+  await pane.press({ key: 'j' })
+  await pane.press({ key: 'j' })
+  expect(await selectedFile(pane)).toBe('src/money.ts')
+  expect(await rowsOf(pane, 'list')).toEqual(['  → currencySymbol  :3', '  → toFixed2        :9'])
+  expect(await selectedSymbol(pane)).toBe('currencySymbol')
 
-  await pane.key({ key: 'left' })
-  expect(await selectedName(pane)).toBe('priceLabel')
-  await pane.key({ key: 'down' })
-  expect(await selectedName(pane)).toBe('formatPrice')
+  await pane.press({ key: 'd' })
+  expect(await selectedSymbol(pane)).toBe('toFixed2')
+  expect(await pane.find({ type: 'Text', text: ' · function · used by formatPrice' })).toBeDefined()
+  await pane.press({ key: 'd' })
+  expect(await selectedSymbol(pane)).toBe('toFixed2')
+  await pane.press({ key: 'u' })
+  expect(await selectedSymbol(pane)).toBe('currencySymbol')
+  expect(await selectedFile(pane)).toBe('src/money.ts')
+  await pane.unmount()
+})
 
-  await pane.pointer({ type: 'down', x: 0, y: 0, button: 'left' })
-  await pane.pointer({ type: 'move', x: box.x + 1, y: box.y + 1 })
-  await pane.pointer({ type: 'down', x: box.x + 1, y: box.y + 1, button: 'right' })
-  expect(await selectedName(pane)).toBe('formatPrice')
+test('a click on a box selects its file, and the arrow keys then move from there', async ($, on) => {
+  await mapped($, on)
+  const pane = await mountPane($)
+  const box = boxOf('emailReceipt')
+  await pane.pointer({ type: 'down', x: box.x + 1, y: box.y + 1, button: 'left', in: 'map' })
+  expect(await selectedFile(pane)).toBe('src/email.ts')
+
+  await pane.key({ key: 'left', in: 'map' })
+  expect(await selectedFile(pane)).toBe('src/ui.ts')
+  await pane.key({ key: 'down', in: 'map' })
+  expect(await selectedFile(pane)).toBe('src/price.ts')
+
+  await pane.pointer({ type: 'down', x: 0, y: 0, button: 'left', in: 'map' })
+  await pane.pointer({ type: 'move', x: box.x + 1, y: box.y + 1, in: 'map' })
+  await pane.pointer({ type: 'down', x: box.x + 1, y: box.y + 1, button: 'right', in: 'map' })
+  expect(await selectedFile(pane)).toBe('src/price.ts')
+  await pane.unmount()
+})
+
+test('a click on a row of the list selects that symbol, and up and down there go through the symbols', async ($, on) => {
+  await mapped($, on)
+  const pane = await mountPane($)
+  const box = boxOf('toFixed2')
+  await pane.pointer({ type: 'down', x: box.x + 1, y: box.y + 1, button: 'left', in: 'map' })
+  expect(await selectedSymbol(pane)).toBe('currencySymbol')
+
+  await pane.pointer({ type: 'down', x: 4, y: 1, button: 'left', in: 'list' })
+  expect(await selectedSymbol(pane)).toBe('toFixed2')
+  await pane.key({ key: 'up', in: 'list' })
+  expect(await selectedSymbol(pane)).toBe('currencySymbol')
+  expect(await selectedFile(pane)).toBe('src/money.ts')
+
+  await pane.key({ key: 'up', in: 'map' })
+  expect(await selectedFile(pane)).toBe('src/price.ts')
+  await pane.unmount()
+})
+
+test('a click on a count scrolls the map and leaves the selection alone; the next move brings the window back to it', async ($, on) => {
+  await mapped($, on)
+  const pane = await mountPane($, { ...PANE, bodyColumns: 44, scroll: { offset: 0, bodyRows: 60 } })
+  const before = await mapRows(pane)
+  expect(before).toEqual(graphIn(44).rows.map(rowText))
+  expect(before.at(-1)).toBe('                                    2 more →')
+
+  await pane.pointer({ type: 'down', x: 40, y: before.length - 1, button: 'left', in: 'map' })
+  const scrolled = await mapRows(pane)
+  expect(scrolled.at(-1)).toBe('← 2 more')
+  expect(scrolled[6]).toBe('…c/invoice.ts │  │ ○ ui.ts │  │ ▲ email.ts │')
+  expect(await selectedFile(pane)).toBe('src/cart.ts')
+
+  await pane.press({ key: 'l' })
+  expect(await selectedFile(pane)).toBe('src/invoice.ts')
+  expect((await mapRows(pane))[6]).toContain('║ ● src/invoice.ts ║')
   await pane.unmount()
 })
 
@@ -652,13 +726,13 @@ test('t switches between the graph and the tree, keeping the selection', async (
   expect((await pane.find({ key: 't' }))?.props.label).toBe('tree view')
 
   await pane.press({ key: 't' })
-  expect((await mapRows(pane))[0]).toStartWith('◆ formatPrice')
-  expect(await selectedName(pane)).toBe('renderInvoice')
+  expect((await mapRows(pane))[0]).toStartWith('◆ src/price.ts')
+  expect(await selectedFile(pane)).toBe('src/invoice.ts')
   expect((await pane.find({ key: 't' }))?.props.label).toBe('graph view')
   await pane.press({ key: 'j' })
-  expect(await selectedName(pane)).toBe('InvoicePage')
+  expect(await selectedFile(pane)).toBe('src/pages/invoice.ts')
 
-  await pane.key({ key: 't' })
+  await pane.key({ key: 't', in: 'map' })
   expect((await mapRows(pane))[0]).toContain('┌')
   await pane.unmount()
 })
@@ -666,7 +740,7 @@ test('t switches between the graph and the tree, keeping the selection', async (
 test('with the view option set to tree, the map opens as a tree', { options: { view: 'tree' } }, async ($, on) => {
   await mapped($, on)
   const pane = await mountPane($)
-  expect((await mapRows(pane))[0]).toStartWith('◆ formatPrice')
+  expect((await mapRows(pane))[0]).toStartWith('◆ src/price.ts')
   await pane.press({ key: 't' })
   expect((await mapRows(pane))[0]).toContain('┌')
   await pane.unmount()
@@ -675,11 +749,11 @@ test('with the view option set to tree, the map opens as a tree', { options: { v
 test('a pane too narrow for the graph draws the tree', async ($, on) => {
   await mapped($, on)
   const narrow = await mountPane($, { ...PANE, bodyColumns: 36 })
-  expect((await mapRows(narrow))[1]).toStartWith('├─ ● renderCart')
+  expect((await mapRows(narrow))[1]).toStartWith('├─ ● src/cart.ts')
   await narrow.unmount()
 })
 
-test('a short pane keeps to the header, the map as a tree, the selected node, and the keys', async ($, on) => {
+test('a short pane keeps to the header, the map as a tree, the list, the reason, and the keys', async ($, on) => {
   await mapped($, on)
   const short = await mountPane($, { ...PANE, bodyColumns: 96, scroll: { offset: 0, bodyRows: 12 } })
   const texts = (await short.findAll({ type: 'Text' })).map(found => found.text)
@@ -687,16 +761,20 @@ test('a short pane keeps to the header, the map as a tree, the selected node, an
   expect(texts).not.toContain(SHOP_MAP.summary)
   expect(texts).not.toContain('uncommitted changes · via LSP')
   expect(texts).not.toContain('◆ changed')
-  expect(texts).toContain('breaks: passes 1 argument; formatPrice now takes 2')
+  expect(texts).not.toContain(' · function · uses formatPrice · used by CheckoutPage')
+  expect(await rowsOf(short, 'list')).toEqual(['  ● renderCart  :14  breaks · untested'])
+  expect(await short.find({ type: 'Text', text: 'passes 1 argument; formatPrice now takes 2' })).toMatchObject({
+    props: { color: 'error', wrap: 'truncate-end' },
+  })
 
   const rows = await mapRows(short)
-  expect(rows).toHaveLength(8)
-  expect(rows[0]).toStartWith('◆ formatPrice')
-  expect(rows.at(-1)).toBe('↓ 2 more below')
+  expect(rows).toHaveLength(5)
+  expect(rows[0]).toStartWith('◆ src/price.ts')
+  expect(rows.at(-1)?.trim()).toBe('↓ 4 more')
 
   expect(await short.find({ key: 't' })).toBeUndefined()
   await short.press({ key: 'j' })
-  expect(await selectedName(short)).toBe('CheckoutPage')
+  expect(await selectedFile(short)).toBe('src/pages/checkout.ts')
   await short.unmount()
 })
 
@@ -713,7 +791,7 @@ test('every letter the pane binds only moves the view: what starts a turn, a map
   const seen = await mapped($, on)
   const pane = await mountPane($)
   const keys = (await pane.findAll({ type: 'Button' })).map(button => button.key ?? '')
-  expect(keys).toEqual(['h', 'j', 'k', 'l', 'n', 't', '1', '2', '3'])
+  expect(keys).toEqual(['h', 'j', 'k', 'l', 'u', 'd', 'n', 't', '1', '2', '3'])
   for (const key of keys.filter(one => /^[a-z]$/.test(one))) await pane.press({ key })
   expect(seen.prompts).toEqual([])
   expect(seen.spawned).toHaveLength(1)
@@ -721,14 +799,19 @@ test('every letter the pane binds only moves the view: what starts a turn, a map
   await pane.unmount()
 })
 
-test('the map keeps its size as the selection moves, however much there is to say about a node', async ($, on) => {
+test('no part of the pane moves as the selection does, however many symbols a file holds or much is said of one', async ($, on) => {
   await mapped($, on)
   const pane = await mountPane($, { ...PANE, bodyColumns: 60, scroll: { offset: 0, bodyRows: 30 } })
-  const before = await mapRows(pane)
-  expect(await selectedName(pane)).toBe('renderCart')
-  await pane.press({ key: 'j' })
-  expect(await selectedName(pane)).toBe('formatPrice')
-  expect(await mapRows(pane)).toHaveLength(before.length)
+  const heights = async (): Promise<unknown[]> => [
+    (await mapRows(pane)).length,
+    (await pane.findAll({ type: 'Box' })).map(box => box.props.height).filter(height => height !== undefined),
+  ]
+  const before = await heights()
+  expect(await selectedFile(pane)).toBe('src/cart.ts')
+  expect(before[1]).toEqual([5])
+  for (const key of ['j', 'j']) await pane.press({ key })
+  expect(await selectedFile(pane)).toBe('src/money.ts')
+  expect(await heights()).toEqual(before)
   await pane.unmount()
 })
 
@@ -768,7 +851,7 @@ test('where the surface has no room for the pane when a map arrives, a toast say
   expect(seen.toasts.at(-1)).toBe('Ripple: the map is ready. Run /ripple to open it.')
 })
 
-test('asking Claude puts a question about the selected node to the conversation', async ($, on) => {
+test('asking Claude puts a question about the selected symbol to the conversation', async ($, on) => {
   const seen = await mapped($, on)
   const pane = await mountPane($)
   await pane.press({ key: 'l' })
@@ -785,13 +868,13 @@ test('re-map starts a fresh mapper on changes already mapped, and its map starts
   const seen = await mapped($, on)
   const pane = await mountPane($)
   await pane.press({ key: 'j' })
-  expect(await selectedName(pane)).toBe('formatPrice')
+  expect(await selectedFile(pane)).toBe('src/price.ts')
 
   await pane.press({ key: '2' })
   expect(seen.spawned).toHaveLength(2)
   expect(seen.status.at(-1)).toBe('mapping…')
   await report($, 'mapper-2')
-  expect(await selectedName(pane)).toBe('renderCart')
+  expect(await selectedFile(pane)).toBe('src/cart.ts')
   await pane.unmount()
 })
 

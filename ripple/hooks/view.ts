@@ -1,14 +1,13 @@
 import type { RippleMode, RippleNode, RippleReport } from '../types'
-import { locOf, markOf, wordsOf } from './draw'
-import type { Drawing, Move, Paint, Room } from './draw'
-import { GRAPH_COLUMNS, GRAPH_ROWS, drawGraph, stepInGraph } from './graph'
+import type { Move, Room, View } from './draw'
+import { GRAPH_COLUMNS, GRAPH_ROWS, graphView } from './graph'
 import { flagged, neighborsOf } from './map'
-import { drawTree, stepInTree } from './tree'
+import { treeView } from './tree'
 
-// What the person is looking at: which view, which node is selected in it,
-// and how the pane's rows are shared out around it.
+// What the person is looking at: which view of the map, which symbol is
+// selected, and how the pane's rows are shared out around them.
 
-/** The keys that move the selection: the arrows once the map has been clicked, and the letters under them. */
+/** The keys that move the selection from file to file: the arrows once the map has been clicked, and the letters under them. */
 export const MOVES: Readonly<Record<string, Move>> = {
   left: 'left',
   right: 'right',
@@ -20,7 +19,12 @@ export const MOVES: Readonly<Record<string, Move>> = {
   j: 'down',
 }
 
-/** The selected node: the one `selected` names while the map still holds it, else where a reader starts. */
+/** The keys that move the selection up and down the selected file's symbols. */
+export const LIST_MOVES: Readonly<Record<string, Move>> = { u: 'up', d: 'down' }
+
+export const VIEWS: Readonly<Record<RippleMode, View>> = { graph: graphView, tree: treeView }
+
+/** The selected symbol: the one `selected` names while the map still holds it, else where a reader starts. */
 export function selectedOf(report: RippleReport, selected: string | null): RippleNode | undefined {
   return (
     report.nodes.find(node => node.id === selected) ??
@@ -35,77 +39,50 @@ export function modeIn(mode: RippleMode, room: Room): RippleMode {
   return room.columns < GRAPH_COLUMNS || room.rows < GRAPH_ROWS ? 'tree' : mode
 }
 
-export function drawView(report: RippleReport, mode: RippleMode, selected: string | null, room: Room): Drawing {
-  const at = selectedOf(report, selected)?.id ?? null
-  return modeIn(mode, room) === 'tree' ? drawTree(report, at, room) : drawGraph(report, at, room)
-}
-
-/** The id selected after one step of the selection. */
-export function stepped(report: RippleReport, mode: RippleMode, selected: string | null, move: Move): string | null {
-  const from = selectedOf(report, selected)
-  if (from === undefined) return selected
-  return (mode === 'tree' ? stepInTree : stepInGraph)(report, from.id, move)
-}
-
-/** The id of the flagged node after the selected one, the first again after the last; the selection kept when nothing is flagged. */
+/** The id of the flagged symbol after the selected one, the first again after the last; the selection kept when nothing is flagged. */
 export function nextFlagged(report: RippleReport, selected: string | null): string | null {
   const all = flagged(report)
   const from = selectedOf(report, selected)?.id
   return all[(all.findIndex(node => node.id === from) + 1) % Math.max(all.length, 1)]?.id ?? selected
 }
 
-/** What the pane says about the selected node, under the map. */
-export type Detail = {
-  name: string
-  /** `function · untested`: what it is, and what else a reader should know of it. */
-  facts: string
-  where: string
-  /** Why it is flagged, or what changed about it. */
-  verdict?: { text: string; paint: Paint }
-  /** `uses formatPrice · used by CheckoutPage, InvoicePage` */
-  links: string
-}
-
-export function detailOf(report: RippleReport, node: RippleNode): Detail {
+/** `function · uses formatPrice · used by CheckoutPage, InvoicePage`: what the selected symbol is, and its links. */
+export function factsOf(report: RippleReport, node: RippleNode): string {
   const { uses, usedBy } = neighborsOf(report, node.id)
   const names = (nodes: RippleNode[]): string => nodes.map(other => other.name).join(', ')
-  const links = [
+  return [
+    node.kind,
     ...(uses.length > 0 ? [`uses ${names(uses)}`] : []),
     ...(usedBy.length > 0 ? [`used by ${names(usedBy)}`] : []),
-  ]
-  const words = wordsOf(node)
-  const verdict = words.filter(word => word !== 'untested').join(' · ')
-  return {
-    name: node.name,
-    facts: [node.kind, ...words.filter(word => word === 'untested')].join(' · '),
-    where: locOf(node),
-    ...(verdict === ''
-      ? {}
-      : { verdict: { text: node.reason === undefined ? verdict : `${verdict}: ${node.reason}`, paint: markOf(node).paint } }),
-    links: links.join(' · '),
-  }
+  ].join(' · ')
 }
 
 /** From this many rows a pane has room for everything said around the map. */
 const ROOMY_ROWS = 28
 /** The fewest rows the map is drawn in, however short the pane. */
-const MIN_MAP_ROWS = 5
-/** The blank rows of a roomy pane: over the map, under it, and over the keys. */
-const GAPS = 3
+const MIN_MAP_ROWS = 4
+/** The most symbols the list shows at once, in a roomy pane and in a short one. */
+const LIST_ROWS = { roomy: 5, compact: 2 }
+/**
+ * The rows under the list for the selected symbol. A roomy pane says what it
+ * is and gives the mapper's reason two rows; a short one gives the reason one.
+ */
+const DETAIL_ROWS = { roomy: 3, compact: 1 }
 /** The room between two things laid side by side in a row that wraps. */
 const FLOW_GAP = 2
 /** What a plain Button adds to its label: its hotkey, a colon, and a space. */
 const KEY_CHARS = 3
 
-/** How the rows under the map are held for the selected node: its name, its verdict, and what it is linked to. */
-export type DetailRows = { verdict: number; links: number }
-
 /** How a pane's rows are shared out. */
 export type Plan = {
-  /** Whether the pane keeps only the header, the map, a short detail, and the keys. */
+  /** Whether the pane keeps only the header, the map, the list, the mapper's reason, and the keys. */
   isCompact: boolean
+  /** The rows over the map. */
+  mapTop: number
   mapRows: number
-  detail: DetailRows
+  listRows: number
+  /** The rows under the list for the selected symbol. */
+  detailRows: number
 }
 
 /** How many rows `text` takes when it is wrapped at spaces across `columns`. */
@@ -142,21 +119,22 @@ export function flowRows(widths: readonly number[], columns: number): number {
 
 /**
  * Shares out a pane's rows. A roomy pane says everything around the map; a
- * short one keeps the header, the notice, two lines on the selected node, and
- * the keys. The rows held for the selected node do not depend on which node
- * it is, so the map keeps its size as the selection moves.
+ * short one keeps the header, the notice, the list, a row for the mapper's
+ * reason, and the keys. The list is as long as the map's fullest file needs,
+ * up to a limit, and nothing here depends on what is selected, so no part of
+ * the pane moves as the selection does.
  */
 export function planOf(
   room: Room,
-  said: { summary: string; hasNotice: boolean; legend: readonly string[]; keys: readonly string[] },
+  said: { summary: string; hasNotice: boolean; legend: readonly string[]; keys: readonly string[]; symbols: number },
 ): Plan {
   const isCompact = room.rows < ROOMY_ROWS
-  const detail: DetailRows = isCompact ? { verdict: 1, links: 0 } : { verdict: 2, links: 1 }
+  const listRows = Math.max(1, Math.min(said.symbols, isCompact ? LIST_ROWS.compact : LIST_ROWS.roomy))
+  const detailRows = isCompact ? DETAIL_ROWS.compact : DETAIL_ROWS.roomy
   const keys = flowRows(
     said.keys.map(label => label.length + KEY_CHARS),
     room.columns,
   )
-  const under = 1 + detail.verdict + detail.links + keys
   const over = isCompact
     ? 1
     : 2 +
@@ -165,10 +143,8 @@ export function planOf(
         said.legend.map(label => label.length),
         room.columns,
       ) +
-      GAPS
-  return {
-    isCompact,
-    mapRows: Math.max(MIN_MAP_ROWS, room.rows - over - (said.hasNotice ? 1 : 0) - under),
-    detail,
-  }
+      1
+  const mapTop = over + (said.hasNotice ? 1 : 0)
+  const under = (isCompact ? 0 : 1) + 1 + listRows + detailRows + (isCompact ? 0 : 1) + keys
+  return { isCompact, mapTop, mapRows: Math.max(MIN_MAP_ROWS, room.rows - mapTop - under), listRows, detailRows }
 }

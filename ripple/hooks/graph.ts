@@ -1,105 +1,184 @@
-import type { RippleNode, RippleReport } from '../types'
-import { markOf, note, windowOf } from './draw'
-import type { Drawing, Hit, Move, Paint, Room, Span } from './draw'
-import { clip, rankOf } from './map'
+import { beyondRow, clipMiddle, markOf, reveal } from './draw'
+import type { Drawing, Hit, Move, Paint, Pan, Room, Span, View } from './draw'
+import { fileOf, isLinked, symbolIn } from './files'
+import type { FileMap, MapFile } from './files'
+import { rankOf } from './map'
 
-// The graph view: the map as boxes in layers along the flow of use, dependents
-// above the change and dependencies below it, with the edges between
-// neighboring layers drawn in box characters.
+// The graph view: a box a file, in layers along the flow of use, the files
+// that use the change above it and the files it uses below, with the links
+// between neighboring layers drawn in box characters. The layers are laid out
+// once, in an order that never changes, and seen through a window that moves.
 
-/** The most characters of a name a box shows. */
-const NAME_CHARS = 20
+/** The most characters of a file's name a box shows. */
+const NAME_CHARS = 24
 /** What a box adds to its label: a space and a border on each side. */
 const BOX_PADDING = 4
-/** The room between two boxes of a layer, where the layer has it to spare. */
+/** The room between two boxes of a layer. */
 const BOX_GAP = 2
 /** A box is a border, its label, and a border. */
 const BOX_ROWS = 3
-/** Between two layers: a row the edges run along, and a row of arrowheads. */
+/** Between two layers: a row the links run along, and a row of arrowheads. */
 const EDGE_ROWS = 2
-/** The narrowest room the graph is drawn in: one box of the widest kind beside a fold box. */
+const LAYER_ROWS = BOX_ROWS + EDGE_ROWS
+/** The narrowest room the graph is drawn in: one box of the widest kind, and the start of the next. */
 export const GRAPH_COLUMNS = 40
-/** The shortest: two layers and the edges between them, between two lines that count what was cut. */
-export const GRAPH_ROWS = 2 * BOX_ROWS + EDGE_ROWS + 2
-/** Where a node with no link to the layer nearer the change is sorted: after those that have one. */
+/** The shortest: two layers and the links between them, over the row that counts what is out of view. */
+export const GRAPH_ROWS = 2 * BOX_ROWS + EDGE_ROWS + 1
+/** How much past the selected box the window keeps in view: the gap, and the start of the box beyond it. */
+const MARGIN = BOX_GAP + 4
+/** How much of a window stays in view when a click scrolls it sideways: about a box. */
+const PAGE_OVERLAP = 16
+/** How far one turn of the wheel scrolls. */
+const WHEEL = { x: 8, y: 2 }
+/** Where a file with no link to the layer nearer the change is sorted: after those that have one. */
 const UNLINKED = Number.MAX_SAFE_INTEGER
 
 /**
- * The map in layers, far dependents first, each layer ordered to sit by what
- * it is linked to in the layer nearer the change, so edges cross less.
+ * The map in layers, the farthest files that use the change first, each layer
+ * ordered to sit by what it is linked to in the layer nearer the change, so
+ * links cross less. Files that tie keep the order the map names them in.
  */
-export function layersOf(report: RippleReport): RippleNode[][] {
-  const byRank = new Map<number, RippleNode[]>()
-  for (const node of report.nodes) byRank.set(rankOf(node), [...(byRank.get(rankOf(node)) ?? []), node])
+export function layersOf(map: FileMap): MapFile[][] {
+  const byRank = new Map<number, MapFile[]>()
+  for (const file of map.files) byRank.set(rankOf(file), [...(byRank.get(rankOf(file)) ?? []), file])
   const ranks = [...byRank.keys()].sort((a, b) => a - b)
   const outward = [...ranks.filter(rank => rank >= 0), ...ranks.filter(rank => rank < 0).reverse()]
 
   for (const rank of outward) {
     const layer = byRank.get(rank) ?? []
     const nearer = rank === 0 ? [] : (byRank.get(rank < 0 ? rank + 1 : rank - 1) ?? [])
-    const placeOf = new Map(nearer.map((node, index) => [node.id, index]))
-    const pullOf = (node: RippleNode): number => {
-      const places = report.edges.flatMap(edge => {
-        const other = rank < 0 ? (edge.from === node.id ? edge.to : '') : edge.to === node.id ? edge.from : ''
-        const place = placeOf.get(other)
-        return place === undefined ? [] : [place]
-      })
+    const pullOf = (file: MapFile): number => {
+      const places = nearer.flatMap((other, place) =>
+        (rank < 0 ? isLinked(map, file, other) : isLinked(map, other, file)) ? [place] : [],
+      )
       return places.length === 0 ? UNLINKED : places.reduce((sum, place) => sum + place, 0) / places.length
     }
-    const pulls = new Map(layer.map(node => [node.id, pullOf(node)]))
+    const pulls = new Map(layer.map(file => [file, pullOf(file)]))
     byRank.set(
       rank,
-      [...layer].sort((a, b) => (pulls.get(a.id) ?? 0) - (pulls.get(b.id) ?? 0)),
+      [...layer].sort((a, b) => (pulls.get(a) ?? 0) - (pulls.get(b) ?? 0)),
     )
   }
   return ranks.map(rank => byRank.get(rank) ?? [])
 }
 
-/** What a node's box says: its mark and its name. */
-function labelOf(node: RippleNode): string {
-  return `${markOf(node).glyph} ${clip(node.name, NAME_CHARS)}`
+/** What a box says of its file: its mark and its name. */
+function nameOf(file: MapFile): string {
+  return `${markOf(file).glyph} ${clipMiddle(file.name, NAME_CHARS)}`
 }
 
-function widthOf(node: RippleNode): number {
-  return labelOf(node).length + BOX_PADDING
+/** What a box says after the name: how many of the map's symbols the file holds, when more than one. */
+function countOf(file: MapFile): string {
+  return file.symbols.length > 1 ? `  ${file.symbols.length}` : ''
 }
 
-/** What the box that stands for the nodes a layer had no room for says. */
-function foldLabel(count: number): string {
-  return `+${count} more`
-}
+/** A file's box: where it starts along its shelf, and how wide it is. */
+type Box = { file: MapFile; x: number; width: number }
 
-function riskiest(nodes: RippleNode[]): Paint {
-  if (nodes.some(node => node.risk === 'breaks')) return 'breaks'
-  return nodes.some(node => node.risk === 'review') ? 'review' : 'dim'
+/**
+ * One layer as it is laid out: its boxes, the columns they take side by
+ * side, and the columns they are laid out across: the room's, or their own
+ * when they are more, which the window then slides over.
+ */
+type Shelf = { boxes: Box[]; width: number; across: number }
+
+/** The whole map laid out for a room `columns` wide, whatever window it is seen through. */
+type Layout = { shelves: Shelf[]; columns: number; rows: number }
+
+const centerOf = (box: Box): number => box.x + Math.floor(box.width / 2)
+
+/**
+ * Seats a shelf's boxes across `columns`, each as near as it can be to the
+ * middle of the boxes of `beside` it is linked to, so that links run short
+ * and straight. The boxes are pushed apart where they would overlap, and the
+ * shelf is then slid back toward where it wanted to be. With nothing beside
+ * it to sit by, the shelf is centered.
+ */
+function seat(shelf: Shelf, columns: number, beside: Box[], isBeside: (box: Box, other: Box) => boolean): void {
+  const wanted = shelf.boxes.map(box => {
+    const linked = beside.filter(other => isBeside(box, other))
+    if (linked.length === 0) return undefined
+    return Math.round(linked.reduce((sum, other) => sum + centerOf(other), 0) / linked.length) - Math.floor(box.width / 2)
+  })
+  const hasWants = wanted.some(want => want !== undefined)
+  let x = hasWants ? 0 : Math.floor((columns - shelf.width) / 2)
+  shelf.boxes.forEach((box, index) => {
+    box.x = Math.max(x, wanted[index] ?? x)
+    x = box.x + box.width + BOX_GAP
+  })
+  let limit = columns
+  for (const box of [...shelf.boxes].reverse()) {
+    box.x = Math.max(0, Math.min(box.x, limit - box.width))
+    limit = box.x - BOX_GAP
+  }
+  const offsets = shelf.boxes.flatMap((box, index) => (wanted[index] === undefined ? [] : [(wanted[index] ?? 0) - box.x]))
+  const [first, last] = [shelf.boxes[0], shelf.boxes.at(-1)]
+  if (offsets.length === 0 || first === undefined || last === undefined) return
+  const mean = Math.round(offsets.reduce((sum, offset) => sum + offset, 0) / offsets.length)
+  const slide = Math.max(-first.x, Math.min(mean, columns - last.x - last.width))
+  for (const box of shelf.boxes) box.x += slide
 }
 
 /**
- * The nodes of a layer that fit across `columns`, in their order, and the
- * rest. The selected node is kept first, then what it is linked to, then the
- * others; among each, what breaks before what needs review before the rest.
- * Nothing is kept ahead of a node that outranks it.
+ * Lays the map out. A shelf that fits across the room is seated in it, the
+ * changed files first and each other shelf against the one nearer them. A
+ * shelf that does not fit runs on from the left edge, to be slid under the
+ * window.
  */
-function fit(
-  layer: RippleNode[],
-  columns: number,
-  selected: string | null,
-  near: ReadonlySet<string>,
-): { shown: RippleNode[]; folded: RippleNode[] } {
-  const whole = layer.reduce((sum, node) => sum + widthOf(node), 0) + (layer.length - 1)
-  if (whole <= columns) return { shown: layer, folded: [] }
-  const weight = (node: RippleNode): number => {
-    if (node.id === selected) return -1
-    return (near.has(node.id) ? 0 : 3) + (node.risk === 'breaks' ? 0 : node.risk === 'review' ? 1 : 2)
+function layoutOf(map: FileMap, room: Room): Layout {
+  const columns = Math.max(room.columns, GRAPH_COLUMNS)
+  const layers = layersOf(map)
+  const shelves: Shelf[] = layers.map(layer => {
+    let x = 0
+    const boxes = layer.map(file => {
+      const box = { file, x, width: nameOf(file).length + countOf(file).length + BOX_PADDING }
+      x += box.width + BOX_GAP
+      return box
+    })
+    return { boxes, width: x - BOX_GAP, across: Math.max(columns, x - BOX_GAP) }
+  })
+  const middle = Math.max(
+    0,
+    layers.findIndex(layer => layer.some(file => file.role === 'changed')),
+  )
+  shelves.forEach((_, step) => {
+    for (const index of step === 0 ? [middle] : [middle - step, middle + step]) {
+      const shelf = shelves[index]
+      if (shelf === undefined) continue
+      const nearer = step === 0 ? undefined : shelves[index < middle ? index + 1 : index - 1]
+      seat(shelf, shelf.across, nearer?.across === shelf.across ? nearer.boxes : [], (box, other) =>
+        index < middle ? isLinked(map, box.file, other.file) : isLinked(map, other.file, box.file),
+      )
+    }
+  })
+  return { shelves, columns, rows: shelves.length * LAYER_ROWS - EDGE_ROWS }
+}
+
+/** How a layout is seen in a room: whether whole, through how many rows, and the farthest the window goes. */
+type Sight = { isWhole: boolean; rows: number; most: Pan }
+
+function sightOf(layout: Layout, room: Room): Sight {
+  const x = Math.max(0, ...layout.shelves.map(shelf => shelf.across - layout.columns))
+  const isWhole = x === 0 && layout.rows <= room.rows
+  const rows = isWhole ? layout.rows : Math.max(1, Math.min(layout.rows, room.rows - 1))
+  return { isWhole, rows, most: { x, y: layout.rows - rows } }
+}
+
+const within = (pan: Pan, most: Pan): Pan => ({
+  x: Math.min(Math.max(pan.x, 0), most.x),
+  y: Math.min(Math.max(pan.y, 0), most.y),
+})
+
+/** How far a shelf has slid under a window at `x`: with it, as far as the shelf's own end. */
+const slideOf = (layout: Layout, shelf: Shelf, x: number): number => Math.min(x, shelf.across - layout.columns)
+
+/** Where the selected file's box is: its shelf's place among the shelves, the shelf, and the box. */
+function placeOf(layout: Layout, picked: MapFile | undefined): { row: number; shelf: Shelf; box: Box } | undefined {
+  for (const [row, shelf] of layout.shelves.entries()) {
+    const box = shelf.boxes.find(one => one.file === picked)
+    if (box !== undefined) return { row, shelf, box }
   }
-  const kept = new Set<string>()
-  let used = foldLabel(layer.length).length + BOX_PADDING
-  for (const node of [...layer].sort((a, b) => weight(a) - weight(b))) {
-    used += widthOf(node) + 1
-    if (kept.size > 0 && used > columns) break
-    kept.add(node.id)
-  }
-  return { shown: layer.filter(node => kept.has(node.id)), folded: layer.filter(node => !kept.has(node.id)) }
+  return undefined
 }
 
 type Frame = { corners: string; across: string; down: string; exit: string }
@@ -107,109 +186,24 @@ type Frame = { corners: string; across: string; down: string; exit: string }
 const FRAMES = {
   plain: { corners: '┌┐└┘', across: '─', down: '│', exit: '┬' },
   selected: { corners: '╔╗╚╝', across: '═', down: '║', exit: '╤' },
-  fold: { corners: '┌┐└┘', across: '╌', down: '╎', exit: '╌' },
 } as const satisfies Record<string, Frame>
 
-type Box = {
-  /** The node a click on the box selects. */
-  id: string
-  /** Every node the box stands for: itself, or all that a fold box holds. */
-  ids: string[]
-  x: number
-  width: number
-  label: string
-  paint: Paint
-  frame: Frame
-  isSelected: boolean
-}
-
-/** One layer as it is drawn: its boxes, and the row its top border is on. */
-type Shelf = { y: number; boxes: Box[] }
-
-function borderOf(box: Box): Paint {
-  if (box.isSelected) return 'accent'
-  return box.paint === 'plain' ? 'dim' : box.paint
-}
-
-const centerOf = (box: Box): number => box.x + Math.floor(box.width / 2)
-
-function boxesOf(layer: RippleNode[], columns: number, selected: string | null, near: ReadonlySet<string>): Box[] {
-  const { shown, folded } = fit(layer, columns, selected, near)
-  const boxes: Box[] = shown.map(node => ({
-    id: node.id,
-    ids: [node.id],
-    x: 0,
-    width: widthOf(node),
-    label: labelOf(node),
-    paint: markOf(node).paint,
-    frame: node.id === selected ? FRAMES.selected : FRAMES.plain,
-    isSelected: node.id === selected,
-  }))
-  const [first] = folded
-  if (first !== undefined) {
-    boxes.push({
-      id: first.id,
-      ids: folded.map(node => node.id),
-      x: 0,
-      width: foldLabel(folded.length).length + BOX_PADDING,
-      label: foldLabel(folded.length),
-      paint: riskiest(folded),
-      frame: FRAMES.fold,
-      isSelected: false,
-    })
-  }
-  return boxes
-}
-
 /**
- * Seats a layer's boxes across `columns`, each as near as it can be to the
- * middle of the boxes of `beside` it is linked to, so that edges run short
- * and straight. The boxes are pushed apart where they would overlap, and the
- * layer is then slid back toward where it wanted to be. With no layer beside
- * it, the layer is centered.
+ * A box where the window shows it: in the window's own cells, which it may
+ * lie partly or wholly outside. One linked to the selected file is lit, as
+ * the links that touch that file are.
  */
-function seat(boxes: Box[], columns: number, beside: Box[], isLinked: (box: Box, other: Box) => boolean): void {
-  const across = boxes.reduce((sum, box) => sum + box.width, 0)
-  const gap = across + BOX_GAP * (boxes.length - 1) <= columns ? BOX_GAP : 1
-  const wanted = boxes.map(box => {
-    const linked = beside.filter(other => isLinked(box, other))
-    if (linked.length === 0) return undefined
-    return Math.round(linked.reduce((sum, other) => sum + centerOf(other), 0) / linked.length) - Math.floor(box.width / 2)
-  })
-  const hasWants = wanted.some(want => want !== undefined)
-  let x = hasWants ? 0 : Math.max(0, Math.floor((columns - across - gap * (boxes.length - 1)) / 2))
-  boxes.forEach((box, index) => {
-    box.x = Math.max(x, wanted[index] ?? x)
-    x = box.x + box.width + gap
-  })
-  let limit = columns
-  for (const box of [...boxes].reverse()) {
-    box.x = Math.max(0, Math.min(box.x, limit - box.width))
-    limit = box.x - gap
-  }
-  const offsets = boxes.flatMap((box, index) => (wanted[index] === undefined ? [] : [(wanted[index] ?? 0) - box.x]))
-  const [first, last] = [boxes[0], boxes.at(-1)]
-  if (offsets.length === 0 || first === undefined || last === undefined) return
-  const mean = Math.round(offsets.reduce((sum, offset) => sum + offset, 0) / offsets.length)
-  const slide = Math.max(-first.x, Math.min(mean, columns - last.x - last.width))
-  for (const box of boxes) box.x += slide
-}
+type Seen = Box & { y: number; isSelected: boolean; isLit: boolean }
 
-/** Seats every shelf: the one at `middle` first, then each shelf against the one nearer the middle. */
-function seatAll(shelves: Shelf[], middle: number, columns: number, uses: (upper: Box, lower: Box) => boolean): void {
-  shelves.forEach((_, step) => {
-    for (const index of step === 0 ? [middle] : [middle - step, middle + step]) {
-      const shelf = shelves[index]
-      if (shelf === undefined) continue
-      const beside = step === 0 ? [] : (shelves[index < middle ? index + 1 : index - 1]?.boxes ?? [])
-      seat(shelf.boxes, columns, beside, (box, other) => (index < middle ? uses(box, other) : uses(other, box)))
-    }
-  })
+function borderOf(box: Seen): Paint {
+  if (box.isSelected || box.isLit) return 'accent'
+  const { paint } = markOf(box.file)
+  return paint === 'plain' ? 'dim' : paint
 }
 
 type Cell = { char: string; paint: Paint; isBold?: true; isInverse?: true }
 
-/** The cells a graph is painted on, and the one way they are written. */
+/** The cells a window is painted on, and the one way they are written: what falls outside them is not. */
 type Canvas = { cells: Cell[][]; put: (x: number, y: number, text: string, style: Omit<Cell, 'char'>) => void }
 
 function canvasOf(columns: number, rows: number): Canvas {
@@ -245,29 +239,39 @@ function spansOf(cells: Cell[]): Span[] {
   return spans
 }
 
-/** Paints every box of every shelf, and answers where a click selects which. */
-function paintBoxes(canvas: Canvas, shelves: Shelf[]): Hit[] {
+/**
+ * Paints a shelf's boxes, and answers where a click selects which file, over
+ * as much of its box as the window shows: the symbol selected in it, or its
+ * first. A box the window's edge cuts ends there in an ellipsis.
+ */
+function paintBoxes(canvas: Canvas, boxes: Seen[], selected: string | null, columns: number): Hit[] {
   const hits: Hit[] = []
-  for (const { y, boxes } of shelves) {
-    for (const box of boxes) {
-      const border = { paint: borderOf(box) }
-      const [topLeft = '', topRight = '', bottomLeft = '', bottomRight = ''] = box.frame.corners
-      const bar = box.frame.across.repeat(box.width - 2)
-      canvas.put(box.x, y, `${topLeft}${bar}${topRight}`, border)
-      canvas.put(box.x, y + 1, box.frame.down, border)
-      canvas.put(box.x + box.width - 1, y + 1, box.frame.down, border)
-      canvas.put(box.x, y + 2, `${bottomLeft}${bar}${bottomRight}`, border)
-      canvas.put(box.x + 2, y + 1, box.label, {
-        paint: box.paint,
-        ...(box.isSelected ? { isBold: true as const, isInverse: true as const } : {}),
-      })
-      hits.push({ id: box.id, x: box.x, y, width: box.width, height: BOX_ROWS })
-    }
+  for (const box of boxes) {
+    const frame = box.isSelected ? FRAMES.selected : FRAMES.plain
+    const border = { paint: borderOf(box) }
+    const [topLeft = '', topRight = '', bottomLeft = '', bottomRight = ''] = frame.corners
+    const bar = frame.across.repeat(box.width - 2)
+    canvas.put(box.x, box.y, `${topLeft}${bar}${topRight}`, border)
+    canvas.put(box.x, box.y + 1, frame.down, border)
+    canvas.put(box.x + box.width - 1, box.y + 1, frame.down, border)
+    canvas.put(box.x, box.y + 2, `${bottomLeft}${bar}${bottomRight}`, border)
+    canvas.put(box.x + 2, box.y + 1, nameOf(box.file), {
+      paint: markOf(box.file).paint,
+      ...(box.isSelected ? { isBold: true as const, isInverse: true as const } : {}),
+    })
+    canvas.put(box.x + 2 + nameOf(box.file).length, box.y + 1, countOf(box.file), { paint: 'dim' })
+    if (box.x < 0 && box.x + box.width > 0) canvas.put(0, box.y + 1, '…', { paint: 'dim' })
+    if (box.x < columns && box.x + box.width > columns) canvas.put(columns - 1, box.y + 1, '…', { paint: 'dim' })
+    const symbol = symbolIn(box.file, selected)
+    const [x, y] = [Math.max(box.x, 0), Math.max(box.y, 0)]
+    const width = Math.min(box.x + box.width, columns) - x
+    const height = Math.min(box.y + BOX_ROWS, canvas.cells.length) - y
+    if (symbol !== undefined && width > 0 && height > 0) hits.push({ id: symbol.id, x, y, width, height })
   }
   return hits
 }
 
-/** Which ways an edge leaves a cell of the row the edges run along; a cell several edges share shows all of theirs. */
+/** Which ways a link leaves a cell of the row the links run along; a cell several links share shows all of theirs. */
 const UP = 1
 const DOWN = 2
 const LEFT = 4
@@ -288,15 +292,17 @@ const JUNCTIONS: Record<number, string> = {
 }
 
 /**
- * Paints the edges between one shelf and the one under it. An edge leaves the
+ * Paints the links between one shelf and the one under it. A link leaves the
  * upper box straight down where that box reaches over the lower one, else
- * from its middle, and what touches the selected node is lit over what does not.
+ * from its middle, and what touches the selected file is lit over what does
+ * not. A link to a box out of the window runs off the window's edge.
  */
-function paintEdges(canvas: Canvas, upper: Shelf, lower: Shelf, uses: (upper: Box, lower: Box) => boolean): void {
-  const runY = upper.y + BOX_ROWS
+function paintEdges(canvas: Canvas, map: FileMap, upper: Seen[], lower: Seen[], columns: number): void {
+  const runY = (upper[0]?.y ?? 0) + BOX_ROWS
   const run = new Map<number, { ways: number; isLit: boolean }>()
   const lit = new Set<string>()
   const mark = (x: number, way: number, isLit: boolean): void => {
+    if (x < 0 || x >= columns) return
     const at = run.get(x) ?? { ways: 0, isLit: false }
     run.set(x, { ways: at.ways | way, isLit: at.isLit || isLit })
   }
@@ -305,18 +311,20 @@ function paintEdges(canvas: Canvas, upper: Shelf, lower: Shelf, uses: (upper: Bo
     if (isLit) lit.add(`${x},${y}`)
     canvas.put(x, y, char, { paint: isLit ? 'accent' : unlit })
   }
-  for (const from of upper.boxes) {
-    for (const to of lower.boxes.filter(box => uses(from, box))) {
+  for (const from of upper) {
+    for (const to of lower.filter(box => isLinked(map, from.file, box.file))) {
       const isLit = from.isSelected || to.isSelected
       const into = centerOf(to)
       const out = into > from.x && into < from.x + from.width - 1 ? into : centerOf(from)
-      paintOnce(out, runY - 1, from.frame.exit, isLit, borderOf(from))
+      const frame = from.isSelected ? FRAMES.selected : FRAMES.plain
+      paintOnce(out, runY - 1, frame.exit, isLit, borderOf(from))
       paintOnce(into, runY + 1, '▼', isLit, 'dim')
       mark(out, UP, isLit)
       mark(into, DOWN, isLit)
-      for (let x = Math.min(out, into); x <= Math.max(out, into); x += 1) {
-        if (x > Math.min(out, into)) mark(x, LEFT, isLit)
-        if (x < Math.max(out, into)) mark(x, RIGHT, isLit)
+      const [start, end] = [Math.min(out, into), Math.max(out, into)]
+      for (let x = Math.max(start, 0); x <= Math.min(end, columns - 1); x += 1) {
+        if (x > start) mark(x, LEFT, isLit)
+        if (x < end) mark(x, RIGHT, isLit)
       }
     }
   }
@@ -324,86 +332,111 @@ function paintEdges(canvas: Canvas, upper: Shelf, lower: Shelf, uses: (upper: Bo
 }
 
 /**
- * The run of layers that fits down `rows`: as many as do, around the selected
- * layer and toward the change, leaving a row for each line that counts a cut.
+ * Draws a layout through a window at `pan`. Every shelf slides under the
+ * window together, each as far as its own end. A map larger than the room has
+ * a row under it that counts the files out of view.
  */
-function layersIn(layers: RippleNode[][], selected: string | null, rows: number): [start: number, end: number] {
-  const changed = Math.max(
-    0,
-    layers.findIndex(layer => layer.some(node => node.role === 'changed')),
+function draw(layout: Layout, map: FileMap, selected: string | null, room: Room, pan: Pan): Drawing {
+  if (layout.shelves.length === 0) return { rows: [], hits: [] }
+  const sight = sightOf(layout, room)
+  const at = within(pan, sight.most)
+  const picked = fileOf(map, selected)
+  const canvas = canvasOf(layout.columns, sight.rows)
+
+  const seen: Seen[][] = layout.shelves.map((shelf, row) =>
+    shelf.boxes.map(box => ({
+      ...box,
+      x: box.x - slideOf(layout, shelf, at.x),
+      y: row * LAYER_ROWS - at.y,
+      isSelected: box.file === picked,
+      isLit: picked !== undefined && (isLinked(map, box.file, picked) || isLinked(map, picked, box.file)),
+    })),
   )
-  const at = layers.findIndex(layer => layer.some(node => node.id === selected))
-  for (let count = layers.length; count > 1; count -= 1) {
-    const [start, end] = windowOf(layers.length, count, at === -1 ? changed : at, changed)
-    const cuts = (start > 0 ? 1 : 0) + (end < layers.length ? 1 : 0)
-    if (count * BOX_ROWS + (count - 1) * EDGE_ROWS + cuts <= rows) return [start, end]
-  }
-  return windowOf(layers.length, 1, at === -1 ? changed : at, changed)
-}
-
-/** Draws the map as a graph in `room`, around the selected node. */
-export function drawGraph(report: RippleReport, selected: string | null, room: Room): Drawing {
-  const layers = layersOf(report)
-  if (layers.length === 0) return { rows: [], hits: [] }
-  const columns = Math.max(room.columns, GRAPH_COLUMNS)
-  const near = new Set(
-    report.edges.flatMap(edge => (edge.from === selected ? [edge.to] : edge.to === selected ? [edge.from] : [])),
-  )
-  const uses = (upper: Box, lower: Box): boolean =>
-    report.edges.some(edge => upper.ids.includes(edge.from) && lower.ids.includes(edge.to))
-
-  const [start, end] = layersIn(layers, selected, room.rows)
-  const top = start > 0 ? 1 : 0
-  const shelves: Shelf[] = layers.slice(start, end).map((layer, index) => ({
-    y: top + index * (BOX_ROWS + EDGE_ROWS),
-    boxes: boxesOf(layer, columns, selected, near),
-  }))
-  const changed = layers.findIndex(layer => layer.some(node => node.role === 'changed'))
-  seatAll(shelves, Math.min(Math.max(changed - start, 0), shelves.length - 1), columns, uses)
-
-  const height = top + shelves.length * BOX_ROWS + (shelves.length - 1) * EDGE_ROWS + (end < layers.length ? 1 : 0)
-  const canvas = canvasOf(columns, height)
-  const hits = paintBoxes(canvas, shelves)
-  shelves.slice(0, -1).forEach((upper, index) => {
-    const lower = shelves[index + 1]
-    if (lower !== undefined) paintEdges(canvas, upper, lower, uses)
-  })
+  const hits = seen.flatMap(boxes => paintBoxes(canvas, boxes, selected, layout.columns))
+  seen.slice(0, -1).forEach((upper, row) => paintEdges(canvas, map, upper, seen[row + 1] ?? [], layout.columns))
 
   const rows = canvas.cells.map(spansOf)
-  const countIn = (some: RippleNode[][]): number => some.reduce((sum, layer) => sum + layer.length, 0)
-  const above = layers[start - 1]?.[0]
-  if (above !== undefined) {
-    rows[0] = note(`↑ ${countIn(layers.slice(0, start))} more above`)
-    hits.push({ id: above.id, x: 0, y: 0, width: columns, height: 1 })
-  }
-  const below = layers[end]?.[0]
-  if (below !== undefined) {
-    rows[height - 1] = note(`↓ ${countIn(layers.slice(end))} more below`)
-    hits.push({ id: below.id, x: 0, y: height - 1, width: columns, height: 1 })
-  }
-  return { rows, hits }
+  if (sight.isWhole) return { rows, hits }
+  const boxes = seen.flat()
+  const beyond = beyondRow(
+    {
+      left: boxes.filter(box => box.x < 0).length,
+      right: boxes.filter(box => box.x + box.width > layout.columns).length,
+      above: boxes.filter(box => box.y < 0).length,
+      below: boxes.filter(box => box.y + BOX_ROWS > sight.rows).length,
+    },
+    layout.columns,
+    { x: Math.max(1, layout.columns - PAGE_OVERLAP), y: LAYER_ROWS },
+    rows.length,
+  )
+  return { rows: [...rows, beyond.row], hits: [...hits, ...beyond.hits] }
 }
 
 /**
- * The node a move from `selected` lands on: left and right along its layer,
- * up toward what uses it and down toward what it uses, to a linked node when
- * the next layer has one.
+ * Where the window stands to show the selected file: as near `from` as it
+ * can, so one that already shows the file, and what lies just past it,
+ * stays where it is.
  */
-export function stepInGraph(report: RippleReport, selected: string, move: Move): string {
-  const layers = layersOf(report)
-  const row = layers.findIndex(layer => layer.some(node => node.id === selected))
-  const layer = layers[row]
-  if (layer === undefined) return selected
-  const column = layer.findIndex(node => node.id === selected)
-  if (move === 'left' || move === 'right') {
-    return layer[column + (move === 'left' ? -1 : 1)]?.id ?? selected
-  }
-  const next = layers[row + (move === 'up' ? -1 : 1)]
-  if (next === undefined) return selected
-  const linked = next.find(node =>
-    report.edges.some(edge =>
-      move === 'up' ? edge.from === node.id && edge.to === selected : edge.from === selected && edge.to === node.id,
-    ),
+function show(layout: Layout, map: FileMap, selected: string | null, room: Room, from: Pan): Pan {
+  const sight = sightOf(layout, room)
+  const at = within(from, sight.most)
+  const place = placeOf(layout, fileOf(map, selected))
+  if (place === undefined) return at
+  const { row, shelf, box } = place
+  const slide = slideOf(layout, shelf, at.x)
+  const shown = reveal(slide, box.x - MARGIN, box.x + box.width + MARGIN, layout.columns, shelf.across)
+  return within(
+    {
+      x: shown === slide ? at.x : shown,
+      y: reveal(at.y, row * LAYER_ROWS - EDGE_ROWS, row * LAYER_ROWS + BOX_ROWS + EDGE_ROWS, sight.rows, layout.rows),
+    },
+    sight.most,
   )
-  return (linked ?? next[Math.min(column, next.length - 1)])?.id ?? selected
+}
+
+/**
+ * Where the window stands after it is scrolled from `from`: by cells, or by
+ * turns of the wheel, which go the way the map has more rooms' worth out of
+ * view, along it or down it.
+ */
+function scroll(layout: Layout, room: Room, from: Pan, by: Pan | number): Pan {
+  const { most, rows } = sightOf(layout, room)
+  const at = within(from, most)
+  const isDown = most.y * layout.columns > most.x * rows
+  const step = typeof by !== 'number' ? by : isDown ? { x: 0, y: by * WHEEL.y } : { x: by * WHEEL.x, y: 0 }
+  return within({ x: at.x + step.x, y: at.y + step.y }, most)
+}
+
+/**
+ * The symbol a move from the selected file lands on, the first of the file
+ * it reaches: left and right along its layer, up toward what uses it and down
+ * toward what it uses, to the linked file nearest it in the window, or with
+ * none linked, the nearest.
+ */
+function step(layout: Layout, map: FileMap, selected: string | null, move: Move, room: Room, pan: Pan): string | null {
+  const place = placeOf(layout, fileOf(map, selected))
+  if (place === undefined) return selected
+  const { row, shelf, box } = place
+  const at = within(pan, sightOf(layout, room).most)
+  let to: Box | undefined
+  if (move === 'left' || move === 'right') {
+    to = shelf.boxes[shelf.boxes.indexOf(box) + (move === 'left' ? -1 : 1)]
+  } else {
+    const next = layout.shelves[row + (move === 'up' ? -1 : 1)]
+    const linked = (next?.boxes ?? []).filter(other =>
+      move === 'up' ? isLinked(map, other.file, box.file) : isLinked(map, box.file, other.file),
+    )
+    const from = centerOf(box) - slideOf(layout, shelf, at.x)
+    const farOf = (other: Box): number =>
+      Math.abs(centerOf(other) - (next === undefined ? 0 : slideOf(layout, next, at.x)) - from)
+    to = [...(linked.length > 0 ? linked : (next?.boxes ?? []))].sort((a, b) => farOf(a) - farOf(b))[0]
+  }
+  return (to === undefined ? undefined : symbolIn(to.file, null)?.id) ?? selected
+}
+
+export const graphView: View = {
+  draw: (map, selected, room, pan) => draw(layoutOf(map, room), map, selected, room, pan),
+  show: (map, selected, room, from) => show(layoutOf(map, room), map, selected, room, from),
+  scroll: (map, room, from, by) => scroll(layoutOf(map, room), room, from, by),
+  step: (map, selected, move, room, pan) => step(layoutOf(map, room), map, selected, move, room, pan),
 }

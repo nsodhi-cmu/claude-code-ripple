@@ -34,7 +34,7 @@
 
 ## Tests
 
-- Test names are sentences describing the claim: `a layer is ordered by what it is linked to in the layer nearer the change, so edges do not cross`, not `test layers 2`.
+- Test names are sentences describing the claim: `a layer is ordered by what it is linked to in the layer nearer the change, so links do not cross`, not `test layers 2`.
 - Keep the set small and keep it hard. A test that is a tautology by the way the code is constructed should not exist; a test that would catch a subtle regression should.
 - A drawing is tested as the whole picture it makes, compared line for line.
 - The engine's side of the mod is tested through the engine's own test kit, as a person and a mapper would drive it: a command, a report, a key, a click.

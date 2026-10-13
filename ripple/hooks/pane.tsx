@@ -4,7 +4,7 @@ import { COLORS } from './draw'
 import type { Drawing, Span } from './draw'
 
 // The pane's surface module: it paints the drawing it is handed, and posts
-// the node a click lands on and each key pressed while it holds the keyboard.
+// what a click lands on and each key pressed while it holds the keyboard.
 // What to do about either is the hooks module's to say.
 
 const styleOf = (span: Span): TextProps => {
@@ -24,7 +24,7 @@ const Pane: ClientModule<Drawing> = (drawing, surface) => {
     const hit = drawing.hits.find(
       area => event.x >= area.x && event.x < area.x + area.width && event.y >= area.y && event.y < area.y + area.height,
     )
-    if (hit !== undefined) surface.post({ select: hit.id })
+    if (hit !== undefined) surface.post('id' in hit ? { select: hit.id } : { scroll: hit.by })
   })
   surface.onKey(event => surface.post({ key: event.key }))
   return (
