@@ -4,21 +4,21 @@ import type { RippleScope } from '../types'
 // commands these functions name and hands back what they printed.
 
 /** What `/ripple <args>` asks for. */
-export type Request = { verb: 'map'; scope: RippleScope; focus: string } | { verb: 'web' | 'reset' }
+export type Request = { verb: 'map'; scope: RippleScope; focus: string } | { verb: 'reset' }
 
-/** `web` and `reset` stand alone, `branch` picks the scope, and any other words are what to focus on. */
+/** `reset` stands alone, `branch` picks the scope, and any other words are what to focus on. */
 export function readRequest(args: string): Request {
   const words = args.trim().split(/\s+/).filter(word => word !== '')
   const [first = '', ...rest] = words
   const verb = first.toLowerCase()
-  if (rest.length === 0 && (verb === 'web' || verb === 'reset')) return { verb }
+  if (rest.length === 0 && verb === 'reset') return { verb }
   if (verb === 'branch') return { verb: 'map', scope: 'branch', focus: rest.join(' ') }
   return { verb: 'map', scope: 'uncommitted', focus: words.join(' ') }
 }
 
 const GIT = ['git', '-c', 'core.quotePath=false'] as const
-/** Everything under the directory the command runs in, but what `/ripple web` writes there. */
-const PATHS = ['--', '.', ':(exclude).ripple'] as const
+/** Everything under the directory the command runs in. */
+const PATHS = ['--', '.'] as const
 /** The most untracked files whose contents are part of a print. */
 const HASHED_FILES = 200
 

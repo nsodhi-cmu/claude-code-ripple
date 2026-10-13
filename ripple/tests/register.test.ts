@@ -58,9 +58,8 @@ const DIFF = (ref: string) => [
   '--dst-prefix=b/',
   '--',
   '.',
-  ':(exclude).ripple',
 ]
-const UNTRACKED = ['-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard', '--', '.', ':(exclude).ripple']
+const UNTRACKED = ['-c', 'core.quotePath=false', 'ls-files', '--others', '--exclude-standard', '--', '.']
 
 /**
  * Stands in for everything beneath the plugin: git, the store, the agents,
@@ -68,7 +67,7 @@ const UNTRACKED = ['-c', 'core.quotePath=false', 'ls-files', '--others', '--excl
  * plugin's spawn on as the Agent tool's call, and reads the agent it started
  * off that tool's result.
  */
-const world = (on: On, options: { stored?: Record<string, unknown>; isWindows?: boolean } = {}) => {
+const world = (on: On, options: { stored?: Record<string, unknown> } = {}) => {
   const seen = {
     status: [] as Array<string | undefined>,
     toasts: [] as string[],
@@ -83,7 +82,7 @@ const world = (on: On, options: { stored?: Record<string, unknown>; isWindows?: 
     agents: [] as Array<{ name: string; tools: unknown; background: unknown }>,
     commands: [] as string[],
     spawned: [] as Array<{ subagentType: string; prompt: string }>,
-    files: new Map<string, string>(),
+    /** Every command the plugin ran that was not git. */
     ran: [] as string[][],
     git: [] as string[][],
     /** What `git diff` answers. */
@@ -105,7 +104,6 @@ const world = (on: On, options: { stored?: Record<string, unknown>; isWindows?: 
     stored: new Map<string, unknown>(Object.entries(options.stored ?? {})),
   }
   mock.clock(on)
-  mock.env(on, options.isWindows === true ? { OS: 'Windows_NT' } : {})
 
   on('store.get', ($, e) => ({ value: seen.stored.get(e.key) }))
   on('store.set', ($, e) => {
@@ -171,10 +169,6 @@ const world = (on: On, options: { stored?: Record<string, unknown>; isWindows?: 
   })
   on('ui.close', ($, e) => {
     seen.closed.push(e.id)
-    return { value: undefined }
-  })
-  on('fs.write', ($, e) => {
-    seen.files.set(e.path.replaceAll('\\', '/'), e.text)
     return { value: undefined }
   })
   on('process.run', ($, e) => {
@@ -817,15 +811,25 @@ test('the pane answers its own keys, so nothing they start runs beneath the plug
   await pane.unmount()
 })
 
-test('every letter the pane binds only moves the view: what starts a turn, a mapper, or a browser is a digit', async ($, on) => {
+test('the mod runs no program but git, whatever it is asked', async ($, on) => {
+  const seen = await mapped($, on)
+  const pane = await mountPane($)
+  for (const key of ['n', 't', '1', '2']) await pane.press({ key })
+  await pane.unmount()
+  await ripple($, 'branch')
+  await ripple($, 'reset')
+  expect(seen.git.length).toBeGreaterThan(4)
+  expect(seen.ran).toEqual([])
+})
+
+test('every letter the pane binds only moves the view: what starts a turn or a mapper is a digit', async ($, on) => {
   const seen = await mapped($, on)
   const pane = await mountPane($)
   const keys = (await pane.findAll({ type: 'Button' })).map(button => button.key ?? '')
-  expect(keys).toEqual(['h', 'j', 'k', 'l', 'u', 'd', 'n', 't', '1', '2', '3'])
+  expect(keys).toEqual(['h', 'j', 'k', 'l', 'u', 'd', 'n', 't', '1', '2'])
   for (const key of keys.filter(one => /^[a-z]$/.test(one))) await pane.press({ key })
   expect(seen.prompts).toEqual([])
   expect(seen.spawned).toHaveLength(1)
-  expect(seen.files.size).toBe(0)
   await pane.unmount()
 })
 
@@ -908,22 +912,6 @@ test('re-map starts a fresh mapper on changes already mapped, and its map starts
   await pane.unmount()
 })
 
-test('/ripple web writes the page and opens it', async ($, on) => {
-  const seen = world(on, { isWindows: true })
-  seen.diff = PRICE_DIFF
-  await start($)
-  expect((await ripple($, 'web')).text).toBe('Ripple: no map to export yet. Run /ripple first.')
-  expect(seen.files.size).toBe(0)
-
-  await ripple($)
-  await report($, 'mapper-1')
-  expect(await ripple($, ' WEB ')).toEqual({ text: 'Ripple: opened .ripple/graph.html' })
-  const [[path, page] = []] = [...seen.files]
-  expect(path).toEndWith('/repo/shop/.ripple/graph.html')
-  expect(page).toStartWith('<!doctype html>')
-  expect(seen.ran).toEqual([['rundll32', 'url.dll,FileProtocolHandler', '\\repo\\shop\\.ripple\\graph.html']])
-})
-
 test('/ripple reset clears the map, the wait, and the pane', async ($, on) => {
   const seen = world(on)
   seen.diff = PRICE_DIFF
@@ -938,10 +926,4 @@ test('/ripple reset clears the map, the wait, and the pane', async ($, on) => {
   expect(seen.closed).toEqual(['ripple'])
   expect(seen.stored.has(STORE_KEY)).toBe(false)
   expect((await report($, 'mapper-2')).deny).toContain('Only the mapper')
-})
-
-test('where the system has no Windows opener, the page is opened with the first opener that works', async ($, on) => {
-  const seen = await mapped($, on)
-  expect(await ripple($, 'web')).toEqual({ text: 'Ripple: opened .ripple/graph.html' })
-  expect(seen.ran).toEqual([['open', '/repo/shop/.ripple/graph.html']])
 })

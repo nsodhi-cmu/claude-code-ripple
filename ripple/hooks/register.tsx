@@ -40,7 +40,7 @@ import {
   taskPrompt,
 } from './mapper'
 import { LIST_MOVES, MOVES, factsOf, modeIn, nextFlagged, planOf, selectedOf, viewsOf } from './view'
-import { graphHtml, ringSvg } from './web'
+import { ringSvg } from './rings'
 
 const PANE = 'ripple'
 /** A room tall enough to draw any map whole, which is how the rows a map needs are counted. */
@@ -53,16 +53,14 @@ const PANE_COLUMNS = 76
 const MIN_COLUMNS = 24
 /** The ring picture's side on the surfaces that draw it, in pixels: the pane's width, within these. */
 const RING_PIXELS = { perColumn: 8, least: 300, most: 720 }
-/** How long a git command and the system's file opener may run, in milliseconds. */
+/** How long a git command may run, in milliseconds. */
 const GIT_TIMEOUT_MS = 20_000
-const OPENER_TIMEOUT_MS = 10_000
 /**
- * The keys that start something: a turn of the conversation, a mapper, a
- * browser. They are digits, which the first letter of a typed prompt never is.
+ * The keys that start something: a turn of the conversation, and a mapper.
+ * They are digits, which the first letter of a typed prompt never is.
  */
 const ASK = '1'
 const REMAP = '2'
-const WEB = '3'
 
 const NOT_A_REPOSITORY = 'Ripple: this is not a git repository, so there are no changes to map.'
 const NO_DEFAULT_BRANCH =
@@ -268,35 +266,6 @@ const showMap = async (
   }
 }
 
-const openInBrowser = async ($: EngineInterface, path: string): Promise<boolean> => {
-  const isWindows = (await $.env.get('OS')) === 'Windows_NT'
-  const attempts = isWindows
-    ? [['rundll32', 'url.dll,FileProtocolHandler', path.replace(/\//g, '\\')]]
-    : [
-        ['open', path],
-        ['xdg-open', path],
-      ]
-  for (const argv of attempts) {
-    try {
-      const ran = await $.process.run(argv, { timeoutMs: OPENER_TIMEOUT_MS })
-      if (ran.exitCode === 0) return true
-    } catch {
-      // Not on this machine: try the next opener.
-    }
-  }
-  return false
-}
-
-/** Writes and opens the web page; resolves to what happened, for the caller to say. */
-const writeWeb = async ($: EngineInterface): Promise<string> => {
-  const held = await read($, map)
-  if (held === null) return 'Ripple: no map to export yet. Run /ripple first.'
-  const path = `${await rootOf($)}/.ripple/graph.html`
-  await $.fs.write(path, graphHtml(held))
-  const isOpen = await openInBrowser($, path)
-  return isOpen ? 'Ripple: opened .ripple/graph.html' : `Ripple: wrote ${path}; open it in a browser.`
-}
-
 const styleOf = (paint: Paint): TextProps => {
   const color = COLORS[paint]
   return { ...(color === undefined ? {} : { color }), ...(paint === 'dim' ? { dimColor: true } : {}) }
@@ -324,7 +293,6 @@ const keysOf = (drawn: RippleMode): Array<{ key: string; label: string; isDim: b
   { key: 't', label: drawn === 'tree' ? 'graph view' : 'tree view', isDim: true },
   { key: ASK, label: 'ask Claude', isDim: false },
   { key: REMAP, label: 're-map', isDim: false },
-  { key: WEB, label: 'web page', isDim: false },
 ]
 
 /** Asks Claude, in the conversation, about the selected node. */
@@ -399,8 +367,8 @@ const press = async ($: EngineInterface, key: string, isInList = false): Promise
       await update($, view, seen => ({ ...seen, mode: other, pan: null }))
     } else if (key === ASK) {
       await ask($)
-    } else if (key === REMAP || key === WEB) {
-      const said = key === WEB ? await writeWeb($) : await showMap($, held.scope, held.focus, true)
+    } else if (key === REMAP) {
+      const said = await showMap($, held.scope, held.focus, true)
       if (said !== undefined) $.ui.toast(said)
     }
   } catch (error) {
@@ -430,7 +398,7 @@ export const register: Register = (on, options) => {
       await $.command.register({
         name: 'ripple',
         description: 'Map what your changes reach',
-        argumentHint: '[branch] [focus] | web | reset',
+        argumentHint: '[branch] [focus] | reset',
       })
       if ((await read($, map)) === null) {
         const kept = readStored(await $.store.get(await storeKey($)))
@@ -453,8 +421,6 @@ export const register: Register = (on, options) => {
       if (request.verb === 'map') {
         said = await showMap($, request.scope, request.focus, false)
         if (said === undefined) await openPane($, true)
-      } else if (request.verb === 'web') {
-        said = await writeWeb($)
       } else {
         await update($, map, () => null)
         await update($, mapping, () => null)
@@ -594,12 +560,7 @@ export const register: Register = (on, options) => {
             <Svg source={ringSvg(held)} alt={headerText(held)} width={side} height={side} isInteractive />
           )}
           {hasNodes && legend(kit)}
-          {held !== null && (
-            <Box flexDirection="row" flexWrap="wrap" columnGap={2}>
-              {button(REMAP, 're-map')}
-              {button(WEB, 'web page')}
-            </Box>
-          )}
+          {held !== null && button(REMAP, 're-map')}
         </Box>
       )
     }

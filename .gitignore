@@ -1,5 +1,2 @@
-# What `/ripple web` writes into a project.
-.ripple/
-
 # Written by Claude Code each time it loads the mod, for the version that loaded it.
 ripple/.claude-plugin/types/

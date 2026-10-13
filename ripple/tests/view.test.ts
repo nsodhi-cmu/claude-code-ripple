@@ -76,7 +76,7 @@ describe('the views', () => {
 
 describe('sharing out the pane', () => {
   const LEGEND = ['◆ changed', '● breaks', '▲ review', '○ ok', '→ uses']
-  const KEYS = ['←', '↓', '↑', '→', 'symbol ↑', 'symbol ↓', 'next flagged', 'tree view', 'ask Claude', 're-map', 'web page']
+  const KEYS = ['←', '↓', '↑', '→', 'symbol ↑', 'symbol ↓', 'next flagged', 'tree view', 'ask Claude', 're-map']
   /** What a pane 76 columns wide spends around the shop's map: six rows over it and ten under it, where it says everything. */
   const said = { summary: 'word '.repeat(30).trim(), hasNotice: false, legend: LEGEND, keys: KEYS, symbols: 2, mapNeeds: 18 }
 
@@ -137,7 +137,7 @@ describe('sharing out the pane', () => {
   })
 
   test('the keys take one row where the pane is wide enough for them and more where it is not', () => {
-    expect(planOf({ columns: 118, rows: 40 }, said).mapRows).toBe(planOf({ columns: 117, rows: 40 }, said).mapRows + 1)
+    expect(planOf({ columns: 105, rows: 40 }, said).mapRows).toBe(planOf({ columns: 104, rows: 40 }, said).mapRows + 1)
   })
 
   test('a short pane keeps the header, the list, a row for the reason, and the keys, and the map takes the rest', () => {

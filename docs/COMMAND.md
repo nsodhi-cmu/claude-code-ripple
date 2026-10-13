@@ -6,15 +6,14 @@
 | :- | :- |
 | `/ripple` | Map the uncommitted changes. |
 | `/ripple branch` | Map the branch. |
-| `/ripple web` | Write and open the web page. |
 | `/ripple reset` | Clear the map, the mapper being waited on, and the stored map, and close the pane. |
 | anything else | A focus. `branch` first picks the branch scope and the rest is the focus; otherwise every word is the focus, on the uncommitted changes. |
 
-`web` and `reset` are verbs only when they stand alone, so `/ripple reset password flow` is a focus.
+`reset` is a verb only when it stands alone, so `/ripple reset password flow` is a focus.
 
 ## Scopes
 
-A scope is which changes are mapped. Each is one diff of the working tree against a base, read with `git diff <base> --relative --unified=0`, plus the files git does not track yet, read with `git ls-files --others --exclude-standard`. Both are run in the session's project root and cover what is under it. The diff is spelled with its prefixes and its other choices fixed, so that nothing in the person's git configuration changes its shape, and both commands leave out `.ripple/`, which `/ripple web` writes.
+A scope is which changes are mapped. Each is one diff of the working tree against a base, read with `git diff <base> --relative --unified=0`, plus the files git does not track yet, read with `git ls-files --others --exclude-standard`. Both are run in the session's project root and cover what is under it. The diff is spelled with its prefixes and its other choices fixed, so that nothing in the person's git configuration changes its shape.
 
 - **uncommitted**: the base is `HEAD`.
 - **branch**: the base is the commit this branch left the default branch at, `git merge-base HEAD <default>`. The default branch is the first of these that exists: what `origin/HEAD` points at, `main`, `master`. With none of them, `/ripple branch` says so and maps nothing.
@@ -41,7 +40,3 @@ While a map is on hand, the changes of its scope are read again at session start
 ## Between Sessions
 
 The last map of a project is kept in the mod's store under `map:<project root>` and read back at session start. `/ripple reset` deletes it.
-
-## The Web Page
-
-`/ripple web` writes the map on hand to `.ripple/graph.html` under the project root and opens it with the system's opener. The page is the ring picture from `ripple/hooks/web.ts` with a key under it; the [views](VIEWS.md#the-rings) describe it.

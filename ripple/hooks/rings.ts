@@ -2,7 +2,7 @@ import type { RippleNode, RippleReport } from '../types'
 import { locOf, wordsOf } from './draw'
 import { clip, headerText } from './map'
 
-// The ring view: the map as an SVG string, and the web page that holds it.
+// The ring view: the map as an SVG string, for the surfaces that draw no graph.
 
 type Family = {
   changed: RippleNode[]
@@ -266,48 +266,9 @@ function shortLoc(node: RippleNode, max: number): string {
 export const SVG_LIMIT = 131072
 
 export type SvgOptions = {
-  /** Adds `data-*` attributes the web page's hover script reads. */
-  hasData?: boolean
   /** Leaves out sublabels and tooltips: the fallback for a picture too large. */
   isBare?: boolean
 }
-
-/**
- * What each mark on the map means and where it comes from, in words a reader
- * can check: the web page prints this under the picture. Every mark is the
- * mapper's reading of the code; Ripple runs no tests.
- */
-export const KEY: ReadonlyArray<{ label: string; fill: string; isDashed?: true; means: string }> = [
-  {
-    label: 'changed',
-    fill: INK.changed,
-    means: 'A symbol the changes touch: a function, a type, a field, a constant. They sit at the center.',
-  },
-  {
-    label: 'breaks',
-    fill: INK.breaks,
-    means:
-      'A dependent that no longer compiles or runs as written: for example it passes the old number of arguments. Hover it for the reason.',
-  },
-  {
-    label: 'review',
-    fill: INK.review,
-    means: 'A dependent that still runs but may now behave differently. Hover it for the reason.',
-  },
-  { label: 'ok', fill: INK.ok, means: 'A dependent the change does not affect.' },
-  {
-    label: 'uses',
-    fill: INK.dependency,
-    means: 'A symbol a changed one uses. Shown for context on the dashed inner ring; it is not judged.',
-  },
-  {
-    label: 'untested',
-    fill: INK.ground,
-    isDashed: true,
-    means:
-      'No test file mentions this symbol by name. Nothing is run: it says a test may be missing, not that one fails.',
-  },
-]
 
 /**
  * The ring view: the changed symbols at the center and what they reach on
@@ -371,14 +332,9 @@ export function ringSvg(map: RippleReport, options: SvgOptions = {}): string {
         ? `stroke="${INK.label}" stroke-opacity="0.75" stroke-width="1.2"`
         : `stroke="${INK.label}" stroke-width="1.6" stroke-dasharray="3 2.4"`
     const halo = `paint-order="stroke" stroke="${INK.ground}" stroke-width="3" stroke-linejoin="round"`
-    const data =
-      options.hasData === true
-        ? ` data-name="${esc(node.name)}" data-loc="${esc(locOf(node))}" data-status="${esc(statusWords(node))}" data-reason="${esc(node.reason ?? '')}"`
-        : ''
 
-    out.push(`<g class="n"${data}>`)
-    // The web page draws its own tooltip from the data attributes.
-    if (options.isBare !== true && options.hasData !== true) {
+    out.push('<g class="n">')
+    if (options.isBare !== true) {
       const tip = [`${node.name} · ${locOf(node)}`, statusWords(node), node.reason ?? '']
         .filter(part => part !== '')
         .join('\n')
@@ -399,67 +355,4 @@ export function ringSvg(map: RippleReport, options: SvgOptions = {}): string {
   out.push('</svg>')
   const svg = out.join('')
   return svg.length > SVG_LIMIT && options.isBare !== true ? ringSvg(map, { ...options, isBare: true }) : svg
-}
-
-/**
- * `.ripple/graph.html`: the ring view, `file:line` beside the pointer, and
- * under the picture what every mark means. A still page: nothing moves.
- */
-export function graphHtml(map: RippleReport): string {
-  const header = esc(headerText(map))
-  const key = KEY.map(
-    entry =>
-      `<li><span class="dot${entry.isDashed ? ' dashed' : ''}" style="background:${entry.fill}"></span><b>${esc(entry.label)}</b><span>${esc(entry.means)}</span></li>`,
-  )
-  return [
-    '<!doctype html>',
-    '<html lang="en">',
-    '<head>',
-    '<meta charset="utf-8">',
-    '<meta name="viewport" content="width=device-width, initial-scale=1">',
-    `<title>${header}</title>`,
-    '<style>',
-    'html,body{margin:0;background:#060a14;color:#e2e8f0;font:13px ui-monospace,SFMono-Regular,Menlo,Consolas,monospace}',
-    'main{min-height:100vh;display:flex;flex-direction:column;align-items:center;gap:12px;padding:20px;box-sizing:border-box}',
-    'h1{font-size:14px;font-weight:600;margin:0}',
-    'svg{width:min(92vw,84vh);height:auto}',
-    '#tip{position:fixed;pointer-events:none;background:#1e293b;border:1px solid #334155;border-radius:6px;padding:6px 9px;max-width:46ch;white-space:pre-wrap}',
-    '#tip b{color:#fbbf24;font-weight:600}',
-    '#tip i{color:#94a3b8;font-style:normal}',
-    '.key{list-style:none;margin:0;padding:0;max-width:min(92vw,84vh);display:grid;gap:7px}',
-    '.key li{display:grid;grid-template-columns:14px 13ch 1fr;gap:8px;align-items:start;line-height:1.45}',
-    '.key .dot{width:10px;height:10px;border-radius:50%;margin-top:4px;border:1px solid rgba(226,232,240,.6);box-sizing:border-box}',
-    '.key .dashed{border:1.5px dashed #e2e8f0}',
-    '.key span:last-child,.note{color:#94a3b8}',
-    '.note{max-width:min(92vw,84vh);margin:0;line-height:1.45}',
-    '</style>',
-    '</head>',
-    '<body>',
-    '<main>',
-    `<h1>${header}</h1>`,
-    ringSvg(map, { hasData: true }),
-    '<ul class="key">',
-    ...key,
-    '</ul>',
-    '<p class="note">Ripple runs no tests and no analysis of its own. A read-only Claude agent traced what depends on the change (with a language server, the type checker, or text search) and judged each dependent; Ripple draws that.</p>',
-    '</main>',
-    '<div id="tip" hidden></div>',
-    '<script>',
-    "const tip = document.getElementById('tip')",
-    "for (const node of document.querySelectorAll('g.n')) {",
-    "  node.addEventListener('mousemove', event => {",
-    '    const { name, loc, status, reason } = node.dataset',
-    "    tip.replaceChildren(Object.assign(document.createElement('b'), { textContent: name }), ' ' + loc)",
-    "    tip.append(Object.assign(document.createElement('i'), { textContent: '\\n' + status + (reason ? ' · ' + reason : '') }))",
-    "    tip.style.left = Math.min(event.clientX + 14, innerWidth - tip.offsetWidth - 8) + 'px'",
-    "    tip.style.top = event.clientY + 16 + 'px'",
-    '    tip.hidden = false',
-    '  })',
-    "  node.addEventListener('mouseleave', () => { tip.hidden = true })",
-    '}',
-    '</script>',
-    '</body>',
-    '</html>',
-    '',
-  ].join('\n')
 }

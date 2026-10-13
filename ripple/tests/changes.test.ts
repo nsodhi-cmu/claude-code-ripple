@@ -118,12 +118,6 @@ describe('what git is asked', () => {
     expect(asked).toContain('--dst-prefix=b/')
   })
 
-  test('neither the diff nor the untracked listing is asked for what /ripple web writes', () => {
-    const paths = ['--', '.', ':(exclude).ripple']
-    expect(diffCommand('HEAD').slice(-3)).toEqual(paths)
-    expect(UNTRACKED_COMMAND.slice(-3)).toEqual(paths)
-  })
-
   test('untracked files are hashed by name, each after the end of the options, and none means no command', () => {
     expect(hashCommand('')).toBeUndefined()
     expect(hashCommand('\n')).toBeUndefined()
@@ -186,9 +180,8 @@ describe('what /ripple was asked', () => {
     expect(readRequest('formatPrice')).toEqual({ verb: 'map', scope: 'uncommitted', focus: 'formatPrice' })
   })
 
-  test('web and reset are verbs only when they stand alone', () => {
-    expect(readRequest(' WEB ')).toEqual({ verb: 'web' })
-    expect(readRequest('reset')).toEqual({ verb: 'reset' })
+  test('reset is a verb only when it stands alone', () => {
+    expect(readRequest(' RESET ')).toEqual({ verb: 'reset' })
     expect(readRequest('reset password flow')).toEqual({
       verb: 'map',
       scope: 'uncommitted',

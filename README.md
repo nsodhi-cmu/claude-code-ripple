@@ -33,7 +33,7 @@ renderCart · function · uses formatPrice · used by CheckoutPage
 passes 1 argument; formatPrice now takes 2
 
 h: ←  j: ↓  k: ↑  l: →  u: symbol ↑  d: symbol ↓  n: next flagged  t: tree view
-1: ask Claude  2: re-map  3: web page
+1: ask Claude  2: re-map
 ```
 
 A diff shows what you changed and nothing of what it reaches. Rename a struct, add a parameter, or loosen a check, and code in files you never opened breaks, or quietly starts doing something else. Ripple maps that code.
@@ -67,7 +67,6 @@ Change something, or ask Claude to, then run `/ripple`.
 | `/ripple` | Maps your uncommitted changes. |
 | `/ripple branch` | Maps everything since this branch left the default one, uncommitted changes included. |
 | `/ripple <focus>` | Maps only what bears on the focus: a symbol, as in `/ripple formatPrice`, or a question, as in `/ripple could this leak the session token?`. Works after `branch` too. |
-| `/ripple web` | Writes the map to `.ripple/graph.html` as a ring picture and opens it in a browser. |
 | `/ripple reset` | Clears the map. |
 
 Mapping runs in the background, so you can keep working while it does. Run `/ripple` again on changes that are already mapped and the map comes straight back, with no model call.
@@ -86,7 +85,6 @@ Each box is a file, marked as the worst of its symbols is, with a count when it 
 | `t` | Switch between the graph and the tree. |
 | `1` | Ask Claude, in the conversation, about the selected symbol. It is asked to explain and to edit nothing. |
 | `2` | Map again: the same scope and focus, as the changes now stand. |
-| `3` | The same as `/ripple web`. |
 
 The keys work while the pane has the keyboard, which it asks for when you open it. `ctrl+x tab` moves the keyboard between the pane and the prompt, and typing anything else goes back to the prompt. The keys that start something are digits, so the first letter of a prompt never sets one off.
 
@@ -146,7 +144,7 @@ Both are in `/config`, or `/plugin configure ripple@claude-code-ripple`.
 | **Default view** | Whether a map opens as the `graph` or as the `tree`. |
 | **Graph scrolling** | How a graph wider than the pane scrolls. `pinned`, as above, slides the long layers and keeps the ones that fit in view. `sheet` lays every layer on one sheet as wide as the longest, each box by the boxes it is linked to, and moves the sheet whole. |
 
-The desktop app, the VS Code extension, and the mobile app draw the map as a still ring picture in place of the graph, with nothing to select: the two buttons under it map again and write the web page.
+The desktop app, the VS Code extension, and the mobile app draw the map as a still ring picture in place of the graph, with nothing to select: the button under it maps again.
 
 ### What The Marks Mean
 
@@ -202,10 +200,9 @@ What Ripple does with that access:
 - **Starts one agent per mapping**, in the background, which reads your code. It can call `Read`, `Bash`, `LSP`, and the report tool. It has no `Edit` or `Write` tool, its instructions forbid changing anything, and any call that would have asked for your permission is refused. A shell command that your session runs without asking, because of your permission rules or a mode such as `bypassPermissions`, is not refused: there the instructions are all that keep the mapper from writing.
 - **Watches permission checks.** To refuse what a mapper would have asked for, a hook sees every permission check of the session. It changes the answer only for a mapper's, and only from "ask" to "deny".
 - **Stores** the last map of each project in the mod's own store, under your Claude Code configuration directory.
-- **Writes** one file, `.ripple/graph.html`, and only for `/ripple web`, which also runs your system's file opener (`open`, `xdg-open`, or `rundll32` on Windows).
 - **Submits a prompt** to your conversation only when you press `1`. The prompt is marked as Ripple's, not as your own words, and quotes what the mapper wrote as the mapper's.
 
-It makes no network requests of its own.
+It writes no file in your project, runs no program but git, and makes no network requests of its own.
 
 ## Limits
 

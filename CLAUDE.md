@@ -32,7 +32,7 @@ ripple/hooks/
   view.ts         the selection, the keys, and how the pane's rows are shared out
   draw.ts         what the views draw with, and how a window follows a selection
   pane.tsx        the surface module that paints a drawing and posts clicks and keys
-  web.ts          the ring picture and the web page
+  rings.ts        the ring picture the other surfaces draw
 ripple/tests/     the tests, one file for each of those it tests
 ripple/types/     the map's types and the session state
 docs/             one file for each part: the command, the mapper, the map, the views

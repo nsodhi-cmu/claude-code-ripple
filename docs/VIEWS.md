@@ -10,7 +10,7 @@ The pane draws the map two ways in a terminal, as a graph and as a tree, and as 
 | `ripple/hooks/list.ts` | The list of the selected file's symbols. |
 | `ripple/hooks/draw.ts` | What all three draw with. |
 | `ripple/hooks/view.ts` | Which view, which symbol is selected, and how the pane's rows are shared out. |
-| `ripple/hooks/web.ts` | The rings. |
+| `ripple/hooks/rings.ts` | The rings. |
 
 ## Drawings
 
@@ -83,7 +83,7 @@ The selection is a symbol's id, and the selected file is the one that holds it. 
 
 A new map starts the selection over.
 
-The keys that start something are digits: `1` asks Claude about the selected symbol, `2` maps the same scope and focus again, and `3` writes the web page. A prompt typed while the pane has the keyboard cannot set one off with its first letter.
+The keys that start something are digits: `1` asks Claude about the selected symbol, and `2` maps the same scope and focus again. A prompt typed while the pane has the keyboard cannot set one off with its first letter.
 
 ## The Pane
 
@@ -103,4 +103,4 @@ The `view` option in the plugin's manifest picks the view a map opens in, and th
 
 ## The Rings
 
-`ringSvg` draws the map as an SVG, a symbol a dot: the changed symbols at the center, their dependencies on a dashed inner ring, direct dependents on the next ring, and farther ones on the outer ring, each beside the dependent it uses. It is what the desktop app, the VS Code extension, and the mobile app show in the pane, over two buttons that map again and write the web page: those surfaces have no selection and no list. It is also what `graphHtml` puts on the page `/ripple web` writes, over a key to every mark.
+`ringSvg` draws the map as an SVG, a symbol a dot: the changed symbols at the center, their dependencies on a dashed inner ring, direct dependents on the next ring, and farther ones on the outer ring, each beside the dependent it uses. It is what the desktop app, the VS Code extension, and the mobile app show in the pane, over a button that maps again: those surfaces have no selection and no list.

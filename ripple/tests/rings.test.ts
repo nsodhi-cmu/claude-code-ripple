@@ -3,7 +3,7 @@ import { describe, expect, test } from 'claude-code/testing'
 import type { RippleNode, RippleReport } from '../types'
 import { SHOP_MAP } from './fixture'
 import { MAX_NODES } from '../hooks/map'
-import { KEY, RING, SVG_LIMIT, graphHtml, ringLayout, ringSvg } from '../hooks/web'
+import { RING, SVG_LIMIT, ringLayout, ringSvg } from '../hooks/rings'
 
 const count = (haystack: string, needle: string): number => haystack.split(needle).length - 1
 
@@ -184,24 +184,5 @@ describe('ring svg', () => {
     const empty = ringSvg({ method: 'grep', nodes: [], edges: [] })
     expect(empty.endsWith('</svg>')).toBe(true)
     expect(count(empty, '<g class="n">')).toBe(0)
-  })
-})
-
-describe('web page', () => {
-  const html = graphHtml(SHOP_MAP)
-
-  test('holds the ring view and what the hover script reads', () => {
-    expect(html.startsWith('<!doctype html>')).toBe(true)
-    expect(html).toContain('<h1>Ripple · 1 change → 6 dependents · 2 break · 1 to review</h1>')
-    expect(html).toContain('data-name="renderCart" data-loc="src/cart.ts:14" data-status="breaks · untested"')
-    expect(count(html, '<script>')).toBe(1)
-    expect(html).toContain("node.addEventListener('mousemove'")
-  })
-
-  test('says under the picture what every mark means and where it comes from', () => {
-    expect(KEY.map(entry => entry.label)).toEqual(['changed', 'breaks', 'review', 'ok', 'uses', 'untested'])
-    expect(html).toContain('<b>uses</b><span>A symbol a changed one uses.')
-    expect(html).toContain('No test file mentions this symbol by name. Nothing is run')
-    expect(html).toContain('Ripple runs no tests and no analysis of its own.')
   })
 })
