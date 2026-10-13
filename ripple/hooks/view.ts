@@ -61,8 +61,12 @@ export function factsOf(report: RippleReport, node: RippleNode): string {
   ].join(' · ')
 }
 
-/** From this many rows a pane has room for everything said around the map. */
-const ROOMY_ROWS = 28
+/**
+ * A pane says everything around the map once that leaves the map this many
+ * rows, when the map needs so many: five layers of the graph, which is as
+ * deep as a mapper goes, and the row that counts what is out of view.
+ */
+const ROOMY_MAP_ROWS = 24
 /** The fewest rows the map is drawn in, however short the pane. */
 const MIN_MAP_ROWS = 4
 /** The most symbols the list shows at once, in a roomy pane and in a short one. */
@@ -79,7 +83,7 @@ const KEY_CHARS = 3
 
 /** How a pane's rows are shared out. */
 export type Plan = {
-  /** Whether the pane keeps only the header, the map, the list, the mapper's reason, and the keys. */
+  /** Whether the pane keeps only the header, the notice, the map, the list, the mapper's reason, and the keys. */
   isCompact: boolean
   /** The rows over the map. */
   mapTop: number
@@ -122,33 +126,48 @@ export function flowRows(widths: readonly number[], columns: number): number {
 }
 
 /**
- * Shares out a pane's rows. A roomy pane says everything around the map; a
- * short one keeps the header, the notice, the list, a row for the mapper's
- * reason, and the keys. The list is as long as the map's fullest file needs,
- * up to a limit, and nothing here depends on what is selected, so no part of
- * the pane moves as the selection does.
+ * Shares out a pane's rows. A pane says everything around the map where the
+ * map still gets the rows it needs to be drawn whole, or `ROOMY_MAP_ROWS` of
+ * them; else it keeps the header, the notice, the list, a row for the
+ * mapper's reason, and the keys, and the map takes the rest. The list is as
+ * long as the map's fullest file needs, up to a limit. Nothing here depends
+ * on what is selected, so the map, the list, and the keys keep their places
+ * as the selection moves.
  */
 export function planOf(
   room: Room,
-  said: { summary: string; hasNotice: boolean; legend: readonly string[]; keys: readonly string[]; symbols: number },
+  said: {
+    summary: string
+    hasNotice: boolean
+    legend: readonly string[]
+    keys: readonly string[]
+    /** The most symbols any file of the map holds. */
+    symbols: number
+    /** The rows the map takes drawn whole. */
+    mapNeeds: number
+  },
 ): Plan {
-  const isCompact = room.rows < ROOMY_ROWS
-  const listRows = Math.max(1, Math.min(said.symbols, isCompact ? LIST_ROWS.compact : LIST_ROWS.roomy))
-  const detailRows = isCompact ? DETAIL_ROWS.compact : DETAIL_ROWS.roomy
   const keys = flowRows(
     said.keys.map(label => label.length + KEY_CHARS),
     room.columns,
   )
-  const over = isCompact
-    ? 1
-    : 2 +
-      wrappedRows(said.summary, room.columns) +
-      flowRows(
-        said.legend.map(label => label.length),
-        room.columns,
-      ) +
-      1
-  const mapTop = over + (said.hasNotice ? 1 : 0)
-  const under = (isCompact ? 0 : 1) + 1 + listRows + detailRows + (isCompact ? 0 : 1) + keys
-  return { isCompact, mapTop, mapRows: Math.max(MIN_MAP_ROWS, room.rows - mapTop - under), listRows, detailRows }
+  const share = (isCompact: boolean): Plan => {
+    const listRows = Math.max(1, Math.min(said.symbols, isCompact ? LIST_ROWS.compact : LIST_ROWS.roomy))
+    const detailRows = isCompact ? DETAIL_ROWS.compact : DETAIL_ROWS.roomy
+    const over = isCompact
+      ? 1
+      : 2 +
+        wrappedRows(said.summary, room.columns) +
+        flowRows(
+          said.legend.map(label => label.length),
+          room.columns,
+        ) +
+        1
+    const mapTop = over + (said.hasNotice ? 1 : 0)
+    const under = (isCompact ? 0 : 1) + 1 + listRows + detailRows + (isCompact ? 0 : 1) + keys
+    return { isCompact, mapTop, mapRows: room.rows - mapTop - under, listRows, detailRows }
+  }
+  const roomy = share(false)
+  const plan = roomy.mapRows >= Math.min(said.mapNeeds, ROOMY_MAP_ROWS) ? roomy : share(true)
+  return { ...plan, mapRows: Math.max(MIN_MAP_ROWS, plan.mapRows) }
 }

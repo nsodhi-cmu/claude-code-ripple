@@ -95,13 +95,17 @@ export function wordsOf(node: RippleNode): string[] {
 }
 
 /**
- * Where a window `size` long over `total` stands so that it shows `start` to
- * `end`: as near `from` as that allows, so a window that already shows them
- * stays where it is. What is longer than the window is shown from its start.
+ * Where a window `size` long over `total` stands to show `start` to `end`. A
+ * window at `from` that already shows them stays there; one that does not
+ * moves just far enough to show them and `margin` more on each side. What is
+ * longer than the window is shown from its start.
  */
-export function reveal(from: number, start: number, end: number, size: number, total: number): number {
-  const shown = Math.min(Math.max(from, end - size), start)
-  return Math.min(Math.max(shown, 0), Math.max(0, total - size))
+export function reveal(from: number, start: number, end: number, size: number, total: number, margin = 0): number {
+  const most = Math.max(0, total - size)
+  const at = Math.min(Math.max(Math.round(from), 0), most)
+  if (start >= at && end <= at + size) return at
+  const shown = Math.min(Math.max(at, end + margin - size), start - margin)
+  return Math.min(Math.max(shown, 0), most)
 }
 
 /** How many files lie past each edge of a window. */
@@ -151,6 +155,12 @@ export function clipMiddle(name: string, max: number): string {
   const kept = Math.max(0, max - 1)
   const head = characters.slice(0, Math.ceil(kept / 2)).join('')
   return `${head}…${characters.slice(characters.length - Math.floor(kept / 2)).join('')}`
+}
+
+/** A path cut to `max` characters from its start, where it says least of the file. */
+export function clipStart(path: string, max: number): string {
+  const characters = [...path]
+  return characters.length > max ? `…${characters.slice(characters.length - Math.max(0, max - 1)).join('')}` : path
 }
 
 /** A row cut to `columns`, the last of them an ellipsis when anything was cut. */

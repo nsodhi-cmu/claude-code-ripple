@@ -707,7 +707,7 @@ test('a click on a row of the list selects that symbol, and up and down there go
   await pane.unmount()
 })
 
-test('a click on a count scrolls the map and leaves the selection alone; the next move brings the window back to it', async ($, on) => {
+test('a click on a count scrolls the map and leaves the selection alone; the window stays until another file is selected', async ($, on) => {
   await mapped($, on)
   const pane = await mountPane($, { ...PANE, bodyColumns: 44, scroll: { offset: 0, bodyRows: 60 } })
   const before = await mapRows(pane)
@@ -719,6 +719,11 @@ test('a click on a count scrolls the map and leaves the selection alone; the nex
   expect(scrolled.at(-1)).toBe('← 2 more')
   expect(scrolled[6]).toBe('…c/invoice.ts │  │ ○ ui.ts │  │ ▲ email.ts │')
   expect(await selectedFile(pane)).toBe('src/cart.ts')
+
+  await pane.press({ key: 'h' })
+  await pane.pointer({ type: 'down', x: 4, y: 0, button: 'left', in: 'list' })
+  expect(await selectedFile(pane)).toBe('src/cart.ts')
+  expect(await mapRows(pane)).toEqual(scrolled)
 
   await pane.press({ key: 'l' })
   expect(await selectedFile(pane)).toBe('src/invoice.ts')
@@ -824,7 +829,7 @@ test('every letter the pane binds only moves the view: what starts a turn, a map
   await pane.unmount()
 })
 
-test('no part of the pane moves as the selection does, however many symbols a file holds or much is said of one', async ($, on) => {
+test('the map and the room under it keep their sizes as the selection moves, however many symbols a file holds', async ($, on) => {
   await mapped($, on)
   const pane = await mountPane($, { ...PANE, bodyColumns: 60, scroll: { offset: 0, bodyRows: 30 } })
   const heights = async (): Promise<unknown[]> => [
@@ -833,7 +838,7 @@ test('no part of the pane moves as the selection does, however many symbols a fi
   ]
   const before = await heights()
   expect(await selectedFile(pane)).toBe('src/cart.ts')
-  expect(before[1]).toEqual([5])
+  expect(before[1]).toEqual([3])
   for (const key of ['j', 'j']) await pane.press({ key })
   expect(await selectedFile(pane)).toBe('src/money.ts')
   expect(await heights()).toEqual(before)

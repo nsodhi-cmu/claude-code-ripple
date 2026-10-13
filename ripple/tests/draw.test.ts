@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { beyondRow, clipMiddle, cutRow, markOf, reveal, rowText } from '../hooks/draw'
+import { beyondRow, clipMiddle, clipStart, cutRow, markOf, reveal, rowText } from '../hooks/draw'
 import type { Span } from '../hooks/draw'
 
 describe('a window brought to what it must show', () => {
@@ -17,6 +17,18 @@ describe('a window brought to what it must show', () => {
   test('what is longer than the window is shown from its start', () => {
     expect(reveal(0, 50, 95, 30, 100)).toBe(50)
     expect(reveal(80, 50, 95, 30, 100)).toBe(50)
+  })
+
+  test('a window that moves shows a margin past what it was moved for, and one that need not move ignores the margin', () => {
+    expect(reveal(10, 50, 60, 30, 100, 4)).toBe(34)
+    expect(reveal(40, 12, 20, 30, 100, 4)).toBe(8)
+    expect(reveal(10, 30, 40, 30, 100, 4)).toBe(10)
+    expect(reveal(10, 10, 20, 30, 100, 4)).toBe(10)
+  })
+
+  test('a window asked to stand between two cells stands on one', () => {
+    expect(reveal(10.4, 12, 20, 30, 100)).toBe(10)
+    expect(reveal(10.6, 50, 60, 30, 100)).toBe(30)
   })
 
   test('the window never leaves what it is a window on', () => {
@@ -85,6 +97,11 @@ describe('cutting text to fit', () => {
   test('a name is cut from its middle, so that how it starts and how it ends both stay', () => {
     expect(clipMiddle('subscription-manager.test.ts', 16)).toBe('subscrip…test.ts')
     expect(clipMiddle('cart.ts', 16)).toBe('cart.ts')
+  })
+
+  test('a path is cut from its start, so that the file\'s own name stays', () => {
+    expect(clipStart('services/billing/src/invoice/Invoice.java', 24)).toBe('…rc/invoice/Invoice.java')
+    expect(clipStart('src/cart.ts', 24)).toBe('src/cart.ts')
   })
 })
 

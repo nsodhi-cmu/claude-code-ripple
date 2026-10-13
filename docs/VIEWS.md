@@ -32,10 +32,10 @@ A map can be larger than the room the pane has for it, so each view is drawn thr
 These hold of both views.
 
 - **The layout does not depend on the selection.** Where a file is drawn depends on the map and the room alone. Selecting a file marks it and, where it was out of view, moves the window.
-- **The window moves no farther than it must.** `show` is built on `reveal`, which leaves a window that already shows something where it is, and otherwise moves it just far enough. The graph keeps the gap after the selected box and the start of the next box in view with it; the tree keeps the next row.
-- **What is out of view is counted.** A view that does not fit ends in a row that counts the files past each edge of the window, the sides' counts at the sides and the counts above and below between them. A click on a count scrolls most of a room that way.
+- **The window moves no farther than it must.** `show` is built on `reveal`. A window that already shows the selected file whole stays where it is, even with the file at its edge. One that does not moves just far enough to show the file and a little past it: in the graph the links above and below the box and the start of the boxes beside it, in the tree the next row.
+- **What is out of view is counted.** A view that does not fit ends in a row that counts the files not wholly in view past each edge of the window, the sides' counts at the sides and the counts above and below between them. A click on a count scrolls that way: most of a room along the graph, a layer down it, and a window's worth of the tree.
 
-The window stands where the person scrolled it until the selection next moves from file to file, and then goes back to following the selection.
+The window stands where the person scrolled it until another file is selected, and then goes back to following the selection.
 
 ## The Graph
 
@@ -45,7 +45,7 @@ A box is a border, a label, and a border. The label is the file's mark and name,
 
 The `scroll` option picks how the layers are laid out across.
 
-- **`pinned`.** A layer that fits the room is seated in it: the layer of the change centered, and every other layer against the one it was ordered by, each box as near as it can be to the middle of the boxes it is linked to. A layer longer than the room runs on from the left edge. Every layer slides under the window by the same amount, each no farther than its own end, so a layer that fits never moves and the links are drawn to wherever the boxes then stand.
+- **`pinned`.** A layer that fits the room is seated in it: the layer of the change centered, and every other layer against the one it was ordered by where that one fits too, each box as near as it can be to the middle of the boxes it is linked to; beside a longer layer it is centered. A layer longer than the room runs on from the left edge. Every layer slides under the window by the same amount, each no farther than its own end, so a layer that fits never moves and the links are drawn to wherever the boxes then stand.
 - **`sheet`.** Every layer is seated across the longest one's width, each box by the boxes it is linked to, and the window moves over all of them alike.
 
 The window moves by cells both ways. A box the window's edge cuts ends there in an ellipsis, and a link to a box out of view runs off the edge. The wheel scrolls along the map or down it, whichever way has more rooms' worth out of view.
@@ -58,7 +58,7 @@ A room narrower than `GRAPH_COLUMNS` or shorter than `GRAPH_ROWS` has no graph: 
 
 `treeOf` gives one row a file. Each changed file heads a tree: the files that use it hang under it, each under the first file one step nearer the change that it uses, and after them the files it uses. A file linked to nothing is a root of its own, after the changed ones.
 
-A row is the file's mark and path, the folder dim, and then the names of its symbols in a column. A row longer than the room ends in an ellipsis. The window moves by rows.
+A row is the file's mark and path, the folder dim, and then the names of its symbols in a column. A path too long for the room loses its start, so the file's own name stays, and a row that still runs past the room ends in an ellipsis. The window moves by rows.
 
 ## The List
 
@@ -89,7 +89,9 @@ The keys that start something are digits: `1` asks Claude about the selected sym
 
 The `ui.render` hook in `ripple/hooks/register.tsx` draws the pane. In a terminal it holds, top to bottom: the header, which changes the map is of and how they were traced, the mapper's summary, a notice while a mapper is at work or once the changes have moved on, the legend, the map, the selected file's path over the list of its symbols, what the selected symbol is and the mapper's reason for it, and the keys.
 
-`planOf` shares the pane's rows out. It counts the summary as it wraps and the legend and the keys as they flow across the pane's width. The list gets as many rows as the map's fullest file has symbols, up to a limit, and the rows under it are fixed, so nothing in the pane moves as the selection does. A pane with fewer than `ROOMY_ROWS` rows keeps only the header, the notice, the map, a shorter list, one row for the reason, and the keys.
+`planOf` shares the pane's rows out. It counts the summary as it wraps and the legend and the keys as they flow across the pane's width. The list and the lines under it share a box of one height, with room for as many rows as the map's fullest file has symbols, up to a limit. So the map, the list, and the keys keep their places as the selection moves, and the lines about the selected symbol follow the last row of the list.
+
+A pane says everything around the map where that still leaves the map the rows it needs to be drawn whole, or `ROOMY_MAP_ROWS` of them. Otherwise it keeps only the header, the notice, the map, a shorter list, one row for the reason, and the keys, so a taller pane never shows less of the map than a shorter one.
 
 The map and the list are each drawn by a surface module, `ripple/hooks/pane.tsx`, because only a surface module is handed pointer events and the arrow keys. It paints the drawing it is given and posts what the person did: the hit a click landed on, and each key pressed while it holds the keyboard. The hooks module keeps the view in the session state `ripple.view`: the mode, the selected symbol, and where the person scrolled the map and the list to, which is null while they follow the selection. It decides what a click or a key does. In the list, the up and down arrows go through the symbols.
 

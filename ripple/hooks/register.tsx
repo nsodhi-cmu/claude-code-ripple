@@ -14,7 +14,7 @@ import {
   readRequest,
 } from './changes'
 import type { Base, Changes } from './changes'
-import { COLORS, LEGEND, markOf } from './draw'
+import { COLORS, LEGEND, clipStart, markOf } from './draw'
 import type { Paint, Pan, Room } from './draw'
 import { fileOf, filesOf } from './files'
 import { drawList, listSays, scrollList, showInList, stepInList } from './list'
@@ -43,6 +43,11 @@ import { LIST_MOVES, MOVES, factsOf, modeIn, nextFlagged, planOf, selectedOf, vi
 import { graphHtml, ringSvg } from './web'
 
 const PANE = 'ripple'
+/** A room tall enough to draw any map whole, which is how the rows a map needs are counted. */
+const WHOLE_ROWS = 1000
+const ORIGIN: Pan = { x: 0, y: 0 }
+/** What the line over the list holds beside the path and the count: its mark, two dots with their spaces, and the link. */
+const OVER_LIST_CHARS = '▸ '.length + 2 * ' · '.length + 'open'.length
 /** The columns the pane asks for when it is docked beside the transcript, and the fewest it draws in. */
 const PANE_COLUMNS = 76
 const MIN_COLUMNS = 24
@@ -337,29 +342,42 @@ const isPan = (value: unknown): value is Pan =>
   Number.isFinite((value as Pan).x) &&
   Number.isFinite((value as Pan).y)
 
-/** Scrolls the map's window from where it was last drawn: by cells, or by turns of the wheel. */
+/** Scrolls the map's window from where the person left it, or where it was last drawn: by cells, or by turns of the wheel. */
 const scrollMap = async ($: EngineInterface, by: Pan | number): Promise<void> => {
   const held = await read($, map)
   if (held === null) return
-  const pan = views[shown.mode].scroll(filesOf(held), shown.room, shown.pan, by)
-  await update($, view, seen => ({ ...seen, pan }))
+  const files = filesOf(held)
+  await update($, view, seen => ({
+    ...seen,
+    pan: views[shown.mode].scroll(files, shown.room, seen.pan ?? shown.pan, by),
+  }))
 }
 
-/** Scrolls the list under the map from where it was last drawn, by rows. */
+/** Scrolls the list under the map from where the person left it, or where it was last drawn, by rows. */
 const scrollSymbols = async ($: EngineInterface, by: number): Promise<void> => {
   const held = await read($, map)
   if (held === null) return
   const file = fileOf(filesOf(held), selectedOf(held, (await read($, view)).selected)?.id ?? null)
   if (file === undefined) return
-  const top = scrollList(file, shown.listRows, shown.top, by)
-  await update($, view, seen => ({ ...seen, top }))
+  await update($, view, seen => ({ ...seen, top: scrollList(file, shown.listRows, seen.top ?? shown.top, by) }))
+}
+
+/**
+ * Selects a symbol. The list goes back to following the selection, and so
+ * does the map's window when the symbol is in another file than the one
+ * selected; a symbol already selected changes nothing.
+ */
+const select = async ($: EngineInterface, held: RippleMap, to: string | null): Promise<void> => {
+  const files = filesOf(held)
+  const from = selectedOf(held, (await read($, view)).selected)?.id ?? null
+  if (to === null || to === from) return
+  const isSameFile = fileOf(files, to) === fileOf(files, from)
+  await update($, view, seen => ({ ...seen, selected: to, pan: isSameFile ? seen.pan : null, top: null }))
 }
 
 /**
  * Does what one key of the pane does: a Button's, or a key the map or the
- * list was handed. A move from file to file, and a jump to what is flagged,
- * give the windows back to the selection; in the list, up and down go through
- * the file's symbols.
+ * list was handed. In the list, up and down go through the file's symbols.
  */
 const press = async ($: EngineInterface, key: string, isInList = false): Promise<void> => {
   try {
@@ -371,12 +389,11 @@ const press = async ($: EngineInterface, key: string, isInList = false): Promise
     const move = MOVES[key]
     const listMove = LIST_MOVES[key] ?? (isInList && (move === 'up' || move === 'down') ? move : undefined)
     if (listMove !== undefined) {
-      if (file !== undefined) await update($, view, seen => ({ ...seen, selected: stepInList(file, at, listMove), top: null }))
+      if (file !== undefined) await select($, held, stepInList(file, at, listMove))
     } else if (move !== undefined) {
-      const selected = views[shown.mode].step(files, at, move, shown.room, shown.pan)
-      await update($, view, seen => ({ ...seen, selected, pan: null, top: null }))
+      await select($, held, views[shown.mode].step(files, at, move, shown.room, shown.pan))
     } else if (key === 'n') {
-      await update($, view, seen => ({ ...seen, selected: nextFlagged(held, at), pan: null, top: null }))
+      await select($, held, nextFlagged(held, at))
     } else if (key === 't') {
       const other: RippleMode = shown.mode === 'tree' ? 'graph' : 'tree'
       await update($, view, seen => ({ ...seen, mode: other, pan: null }))
@@ -512,8 +529,9 @@ export const register: Register = (on, options) => {
 
   on('ui.message', async ($, e, next) => {
     if (e.requestId !== PANE || typeof e.data !== 'object' || e.data === null) return next(e)
-    const { select, scroll, key } = e.data as { select?: unknown; scroll?: unknown; key?: unknown }
-    if (typeof select === 'string') await update($, view, seen => ({ ...seen, selected: select, pan: null, top: null }))
+    const { select: picked, scroll, key } = e.data as { select?: unknown; scroll?: unknown; key?: unknown }
+    const held = await read($, map)
+    if (typeof picked === 'string' && held !== null) await select($, held, picked)
     else if (typeof key === 'string') await press($, key, e.element === 'list')
     else if (isPan(scroll)) await scrollMap($, scroll)
     return {}
@@ -590,19 +608,22 @@ export const register: Register = (on, options) => {
     const files = hasNodes ? filesOf(held) : undefined
     const node = hasNodes ? selectedOf(held, seen.selected) : undefined
     const file = files === undefined ? undefined : fileOf(files, node?.id ?? null)
+    const asked = modeIn(seen.mode ?? firstMode, { columns, rows: WHOLE_ROWS })
     const plan = planOf(
       { columns, rows: e.props.scroll.bodyRows },
       {
         summary: held?.summary ?? '',
         hasNotice: notice !== undefined,
         legend: LEGEND_LABELS,
-        keys: keysOf(seen.mode ?? firstMode).map(one => one.label),
+        keys: keysOf(asked).map(one => one.label),
         symbols: Math.max(1, ...(files?.files ?? []).map(one => one.symbols.length)),
+        mapNeeds:
+          files === undefined ? 0 : views[asked].draw(files, null, { columns, rows: WHOLE_ROWS }, ORIGIN).rows.length,
       },
     )
     const room = { columns, rows: plan.mapRows }
     const gap = plan.isCompact ? 0 : 1
-    const mode = modeIn(seen.mode ?? firstMode, room)
+    const mode = modeIn(asked, room)
     const keys = keysOf(mode).filter(one => one.key !== 't' || modeIn('graph', room) === 'graph')
     const root = await rootOf($)
 
@@ -611,14 +632,15 @@ export const register: Register = (on, options) => {
       const pan = seen.pan ?? views[mode].show(files, node.id, room, shown.pan)
       const top = seen.top ?? showInList(file, node.id, plan.listRows, shown.top)
       const picture = views[mode].draw(files, node.id, room, pan)
+      const says = listSays(file, plan.listRows, top)
       shown = { mode, room, pan, listRows: plan.listRows, top, listAt: plan.mapTop + picture.rows.length + gap }
       drawn = (
         <Box flexDirection="column" marginTop={gap}>
           <Client key="map" module="./pane.tsx" props={picture} />
           <Box flexDirection="column" marginTop={gap}>
             <Text wrap="truncate-end">
-              <Text bold>{`▸ ${file.path}`}</Text>
-              <Text dimColor>{` · ${listSays(file, plan.listRows, top)} · `}</Text>
+              <Text bold>{`▸ ${clipStart(file.path, Math.max(1, columns - says.length - OVER_LIST_CHARS))}`}</Text>
+              <Text dimColor>{` · ${says} · `}</Text>
               <Link href={`file://${root}/${file.path}`} label="open" />
             </Text>
             <Box flexDirection="column" height={plan.listRows + plan.detailRows} overflow="hidden">

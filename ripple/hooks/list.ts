@@ -11,7 +11,7 @@ import { clip, plural } from './map'
 const NAME_CHARS = 28
 
 const topIn = (file: MapFile, rows: number, top: number): number =>
-  Math.min(Math.max(top, 0), Math.max(0, file.symbols.length - rows))
+  Math.min(Math.max(Math.round(top), 0), Math.max(0, file.symbols.length - rows))
 
 /** `2 symbols`, or with more than the list shows at once, which of them it shows: `symbols 3–5 of 9`. */
 export function listSays(file: MapFile, rows: number, top: number): string {

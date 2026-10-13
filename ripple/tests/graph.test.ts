@@ -203,7 +203,20 @@ describe('the drawing', () => {
       nodes: [node('core', { role: 'changed', depth: 0, file: 'src/subscription-renewal-manager.test.ts' })],
       edges: [],
     })
-    expect(picture(graph.draw(long, null, WHOLE, ORIGIN))[1]?.trim()).toBe('│ ◆ subscription…ger.test.ts │')
+    expect(picture(graph.draw(long, null, WHOLE, ORIGIN))[1]?.trim()).toBe('│ ◆ subscription-ren…manager.test.ts │')
+  })
+
+  test('names that differ only in their middle are still told apart in their boxes', () => {
+    const alike = filesOf({
+      method: 'grep',
+      nodes: ['item', 'list', 'menu'].map(part =>
+        node(part, { role: 'changed', depth: 0, file: `src/shopping-cart-${part}.component.ts` }),
+      ),
+      edges: [],
+    })
+    expect(picture(graph.draw(alike, null, { columns: 120, rows: 40 }, ORIGIN))[1]?.trim()).toBe(
+      '│ ◆ shopping-cart-item.component.ts │  │ ◆ shopping-cart-list.component.ts │  │ ◆ shopping-cart-menu.component.ts │',
+    )
   })
 })
 
@@ -254,6 +267,13 @@ describe('a layer longer than the room', () => {
     expect(places('core')).toEqual(places('user0'))
     expect(picture(graph.draw(map, 'core', room, { x: 30, y: 0 }))[1]).toBe(
       '  │ ○ user2.ts │  │ ○ user3.ts │  │ ○ user4.ts │  │ ○ user5…',
+    )
+  })
+
+  test('a window that shows the selected box whole stays where it is, though the box stands at its edge', () => {
+    expect(graph.show(SHOP, id('priceLabel'), NARROW, { x: 4, y: 0 })).toEqual({ x: 4, y: 0 })
+    expect(picture(graph.draw(SHOP, id('priceLabel'), NARROW, { x: 4, y: 0 }))[6]).toBe(
+      '…art.ts │  │ ● src/invoice.ts │  ║ ○ ui.ts ║',
     )
   })
 
@@ -351,7 +371,7 @@ describe('laid on one sheet', () => {
 
   test('the window goes to the selected file wherever on the sheet it is', () => {
     expect(sheet.show(SHOP, id('emailReceipt'), NARROW, ORIGIN)).toEqual({ x: 20, y: 0 })
-    expect(sheet.show(SHOP, id('formatPrice'), NARROW, { x: 20, y: 0 })).toEqual({ x: 19, y: 0 })
+    expect(sheet.show(SHOP, id('formatPrice'), NARROW, { x: 20, y: 0 })).toEqual({ x: 20, y: 0 })
     expect(sheet.show(SHOP, id('CheckoutPage'), NARROW, { x: 20, y: 0 })).toEqual({ x: 0, y: 0 })
   })
 })

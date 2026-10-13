@@ -1,4 +1,4 @@
-import { beyondRow, cutRow, markOf, reveal } from './draw'
+import { beyondRow, clipStart, cutRow, markOf, reveal } from './draw'
 import type { Drawing, Hit, Move, Pan, Room, Span, View } from './draw'
 import { fileOf, isLinked, symbolIn } from './files'
 import type { FileMap, MapFile } from './files'
@@ -9,7 +9,9 @@ import type { FileMap, MapFile } from './files'
 
 /** How far the symbols after a path are pushed right to line up; a longer path pushes its own. */
 const PATH_COLUMNS = 44
-/** How many rows past the selected one the window keeps in view. */
+/** The room between a path, or the column the paths end at, and the symbols after it. */
+const NAMES_GAP = 2
+/** How many rows past the selected one a window that moves to it shows. */
 const MARGIN = 1
 /** How many rows one turn of the wheel scrolls. */
 const WHEEL = 2
@@ -62,19 +64,22 @@ function shownIn(total: number, room: Room): number {
   return total <= room.rows ? total : Math.max(1, room.rows - 1)
 }
 
-const startOf = (total: number, shown: number, pan: Pan): number => Math.min(Math.max(pan.y, 0), total - shown)
+const startOf = (total: number, shown: number, pan: Pan): number =>
+  Math.min(Math.max(Math.round(pan.y), 0), total - shown)
 
 /**
- * Draws the map as a tree through a window at `pan`. A row that runs past
- * the room ends in an ellipsis, and a tree taller than the room has a row
- * under it that counts the files out of view.
+ * Draws the map as a tree through a window at `pan`. A path too long for
+ * the room loses its start, so the file's own name stays; a row that still
+ * runs past the room ends in an ellipsis; and a tree taller than the room
+ * has a row under it that counts the files out of view.
  */
 function draw(map: FileMap, selected: string | null, room: Room, pan: Pan): Drawing {
   const tree = treeOf(map)
   const picked = fileOf(map, selected)
   const shown = shownIn(tree.length, room)
   const start = startOf(tree.length, shown, pan)
-  const headOf = (row: TreeRow): number => row.lead.length + 2 + row.file.path.length
+  const pathOf = (row: TreeRow): string => clipStart(row.file.path, Math.max(1, room.columns - row.lead.length - 2))
+  const headOf = (row: TreeRow): number => row.lead.length + 2 + pathOf(row).length
   const pathColumns = Math.min(PATH_COLUMNS, Math.max(0, ...tree.map(headOf)))
 
   const rows: Span[][] = []
@@ -82,22 +87,23 @@ function draw(map: FileMap, selected: string | null, room: Room, pan: Pan): Draw
   for (const row of tree.slice(start, start + shown)) {
     const { file } = row
     const mark = markOf(file)
-    const folder = file.path.slice(0, file.path.lastIndexOf('/') + 1)
+    const path = pathOf(row)
+    const folder = path.slice(0, path.lastIndexOf('/') + 1)
     const symbol = symbolIn(file, selected)
     const spans: Span[] = [
       { text: row.lead, paint: 'dim' },
       { text: `${mark.glyph} `, paint: mark.paint },
       { text: folder, paint: 'dim' },
       {
-        text: file.path.slice(folder.length),
+        text: path.slice(folder.length),
         paint: mark.paint,
         ...(file === picked ? { isBold: true as const, isInverse: true as const } : {}),
       },
-      {
-        text: `${' '.repeat(Math.max(0, pathColumns - headOf(row)) + 2)}${file.symbols.map(one => one.name).join(', ')}`,
-        paint: 'dim',
-      },
     ]
+    if (headOf(row) + NAMES_GAP < room.columns) {
+      const gap = ' '.repeat(Math.max(0, pathColumns - headOf(row)) + NAMES_GAP)
+      spans.push({ text: `${gap}${file.symbols.map(one => one.name).join(', ')}`, paint: 'dim' })
+    }
     if (symbol !== undefined) hits.push({ id: symbol.id, x: 0, y: rows.length, width: room.columns, height: 1 })
     rows.push(cutRow(spans, room.columns))
   }
@@ -111,7 +117,7 @@ function draw(map: FileMap, selected: string | null, room: Room, pan: Pan): Draw
   return { rows: [...rows, beyond.row], hits: [...hits, ...beyond.hits] }
 }
 
-/** Where the window stands to show the selected file's row and the rows next to it: as near `from` as it can. */
+/** Where the window stands to show the selected file's row: where it is when it shows the row, else just far enough to show it and the row past it. */
 function show(map: FileMap, selected: string | null, room: Room, from: Pan): Pan {
   const tree = treeOf(map)
   const picked = fileOf(map, selected)
@@ -121,7 +127,7 @@ function show(map: FileMap, selected: string | null, room: Room, from: Pan): Pan
     tree.findIndex(row => row.file === picked),
   )
   const margin = shown > 2 * MARGIN ? MARGIN : 0
-  return { x: 0, y: reveal(startOf(tree.length, shown, from), at - margin, at + 1 + margin, shown, tree.length) }
+  return { x: 0, y: reveal(from.y, at, at + 1, shown, tree.length, margin) }
 }
 
 /** Where the window stands after it is scrolled from `from`: by rows, or by turns of the wheel. */

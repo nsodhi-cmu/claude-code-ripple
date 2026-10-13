@@ -18,7 +18,7 @@ import { rankOf } from './map'
 export type GraphScroll = 'pinned' | 'sheet'
 
 /** The most characters of a file's name a box shows. */
-const NAME_CHARS = 24
+const NAME_CHARS = 32
 /** What a box adds to its label: a space and a border on each side. */
 const BOX_PADDING = 4
 /** The room between two boxes of a layer. */
@@ -28,11 +28,11 @@ const BOX_ROWS = 3
 /** Between two layers: a row the links run along, and a row of arrowheads. */
 const EDGE_ROWS = 2
 const LAYER_ROWS = BOX_ROWS + EDGE_ROWS
-/** The narrowest room the graph is drawn in: one box of the widest kind, and the start of the next. */
+/** The narrowest room the graph is drawn in: a box of the widest kind, less a little. */
 export const GRAPH_COLUMNS = 40
 /** The shortest: two layers and the links between them, over the row that counts what is out of view. */
 export const GRAPH_ROWS = 2 * BOX_ROWS + EDGE_ROWS + 1
-/** How much past the selected box the window keeps in view: the gap, and the start of the box beyond it. */
+/** How much past the selected box a window that moves to it shows: the gap, and the start of the box beyond it. */
 const MARGIN = BOX_GAP + 4
 /** How much of a window stays in view when a click scrolls it sideways: about a box. */
 const PAGE_OVERLAP = 16
@@ -175,8 +175,8 @@ function sightOf(layout: Layout, room: Room): Sight {
 }
 
 const within = (pan: Pan, most: Pan): Pan => ({
-  x: Math.min(Math.max(pan.x, 0), most.x),
-  y: Math.min(Math.max(pan.y, 0), most.y),
+  x: Math.min(Math.max(Math.round(pan.x), 0), most.x),
+  y: Math.min(Math.max(Math.round(pan.y), 0), most.y),
 })
 
 /** How far a shelf has slid under a window at `x`: with it, as far as the end of what the shelf is laid out across. */
@@ -383,9 +383,10 @@ function draw(layout: Layout, map: FileMap, selected: string | null, room: Room,
 }
 
 /**
- * Where the window stands to show the selected file: as near `from` as it
- * can, so one that already shows the file, and what lies just past it,
- * stays where it is.
+ * Where the window stands to show the selected file. One that already shows
+ * its whole box stays where it is; one that does not moves just far enough
+ * to show the box, the links above and below it, and the start of the boxes
+ * beside it.
  */
 function show(layout: Layout, map: FileMap, selected: string | null, room: Room, from: Pan): Pan {
   const sight = sightOf(layout, room)
@@ -394,11 +395,11 @@ function show(layout: Layout, map: FileMap, selected: string | null, room: Room,
   if (place === undefined) return at
   const { row, shelf, box } = place
   const slide = slideOf(layout, shelf, at.x)
-  const shown = reveal(slide, box.x - MARGIN, box.x + box.width + MARGIN, layout.columns, shelf.across)
+  const shown = reveal(slide, box.x, box.x + box.width, layout.columns, shelf.across, MARGIN)
   return within(
     {
       x: shown === slide ? at.x : shown,
-      y: reveal(at.y, row * LAYER_ROWS - EDGE_ROWS, row * LAYER_ROWS + BOX_ROWS + EDGE_ROWS, sight.rows, layout.rows),
+      y: reveal(at.y, row * LAYER_ROWS, row * LAYER_ROWS + BOX_ROWS, sight.rows, layout.rows, EDGE_ROWS),
     },
     sight.most,
   )

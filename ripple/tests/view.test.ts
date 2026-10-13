@@ -60,12 +60,10 @@ describe('the views', () => {
     expect(views.tree.step(shop, id('formatPrice'), 'down', room, origin)).toBe(id('renderCart'))
   })
 
-  test('the graph scrolls as it is told to, and the tree is the same tree either way', () => {
+  test('the graph scrolls as it is told to: pinned, a layer that fits never leaves the window; on a sheet it does', () => {
     const narrow = { columns: 44, rows: 40 }
-    const [pinned, sheet] = [viewsOf('pinned'), viewsOf('sheet')]
-    expect(pinned.graph.show(shop, id('formatPrice'), narrow, { x: 20, y: 0 })).toEqual({ x: 20, y: 0 })
-    expect(sheet.graph.show(shop, id('formatPrice'), narrow, { x: 20, y: 0 })).toEqual({ x: 19, y: 0 })
-    expect(sheet.tree).toBe(pinned.tree)
+    expect(viewsOf('pinned').graph.show(shop, id('CheckoutPage'), narrow, { x: 20, y: 0 })).toEqual({ x: 20, y: 0 })
+    expect(viewsOf('sheet').graph.show(shop, id('CheckoutPage'), narrow, { x: 20, y: 0 })).toEqual({ x: 0, y: 0 })
   })
 
   test('a room too narrow or too short for the graph gets the tree instead', () => {
@@ -79,7 +77,8 @@ describe('the views', () => {
 describe('sharing out the pane', () => {
   const LEGEND = ['◆ changed', '● breaks', '▲ review', '○ ok', '→ uses']
   const KEYS = ['←', '↓', '↑', '→', 'symbol ↑', 'symbol ↓', 'next flagged', 'tree view', 'ask Claude', 're-map', 'web page']
-  const said = { summary: 'word '.repeat(30).trim(), hasNotice: false, legend: LEGEND, keys: KEYS, symbols: 2 }
+  /** What a pane 76 columns wide spends around the shop's map: six rows over it and ten under it, where it says everything. */
+  const said = { summary: 'word '.repeat(30).trim(), hasNotice: false, legend: LEGEND, keys: KEYS, symbols: 2, mapNeeds: 18 }
 
   test('text is counted as it wraps at spaces, not by its length', () => {
     expect(wrappedRows('', 10)).toBe(0)
@@ -94,6 +93,29 @@ describe('sharing out the pane', () => {
     expect(flowRows([10, 10, 10], 34)).toBe(1)
     expect(flowRows([10, 10, 10], 33)).toBe(2)
     expect(flowRows([40, 40, 40], 30)).toBe(3)
+  })
+
+  test('a pane says everything around the map where the map still gets the rows it needs, and not a row sooner', () => {
+    expect(planOf({ columns: 76, rows: 34 }, said)).toMatchObject({ isCompact: false, mapRows: 18 })
+    expect(planOf({ columns: 76, rows: 33 }, said)).toMatchObject({ isCompact: true, mapRows: 26 })
+    expect(planOf({ columns: 76, rows: 24 }, { ...said, mapNeeds: 8 })).toMatchObject({ isCompact: false, mapRows: 8 })
+  })
+
+  test('a map too long to ever fit gets everything said once it has room for the deepest graph', () => {
+    expect(planOf({ columns: 76, rows: 40 }, { ...said, mapNeeds: 200 })).toMatchObject({ isCompact: false, mapRows: 24 })
+    expect(planOf({ columns: 76, rows: 39 }, { ...said, mapNeeds: 200 })).toMatchObject({ isCompact: true, mapRows: 32 })
+  })
+
+  test('a taller pane never shows less of a map that fits', () => {
+    for (const mapNeeds of [5, 8, 13, 18, 23]) {
+      let shown = 0
+      for (let rows = 6; rows <= 70; rows += 1) {
+        const now = Math.min(mapNeeds, planOf({ columns: 76, rows }, { ...said, mapNeeds }).mapRows)
+        expect(now).toBeGreaterThanOrEqual(shown)
+        shown = now
+      }
+      expect(shown).toBe(mapNeeds)
+    }
   })
 
   test('a roomy pane says everything, lists as many symbols as the fullest file has, and gives the map what is left', () => {

@@ -163,6 +163,29 @@ describe('the drawing', () => {
     )
   })
 
+  test('a path too long for the room loses its start, so each file\'s own name stays, and the selected one stays marked', () => {
+    const folder = 'services/billing/src/main/java/com/acme/billing/invoice'
+    const deep = filesOf({
+      method: 'grep',
+      nodes: [
+        node('Invoice', { role: 'changed', depth: 0, file: `${folder}/Invoice.java` }),
+        node('InvoiceLine', { file: `${folder}/InvoiceLine.java` }),
+        node('InvoiceMapper', { file: `${folder}/InvoiceMapper.java` }),
+      ],
+      edges: [
+        { from: 'InvoiceLine', to: 'Invoice' },
+        { from: 'InvoiceMapper', to: 'Invoice' },
+      ],
+    })
+    const drawing = treeView.draw(deep, 'InvoiceMapper', { columns: 50, rows: 40 }, ORIGIN)
+    expect(drawing.rows.map(rowText)).toEqual([
+      '◆ …main/java/com/acme/billing/invoice/Invoice.java',
+      '├─ ○ …va/com/acme/billing/invoice/InvoiceLine.java',
+      '└─ ○ …/com/acme/billing/invoice/InvoiceMapper.java',
+    ])
+    expect(drawing.rows[2]?.find(span => span.isInverse)?.text).toBe('InvoiceMapper.java')
+  })
+
   test('a row longer than the room ends in an ellipsis', () => {
     expect(treeView.draw(SHOP, null, { columns: 34, rows: 40 }, ORIGIN).rows.map(rowText).slice(0, 3)).toEqual([
       '◆ src/price.ts                 fo…',

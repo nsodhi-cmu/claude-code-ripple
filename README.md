@@ -213,6 +213,7 @@ It makes no network requests of its own.
 - A mapping is one agent run, which costs what any subagent costs. It runs only when you ask.
 - A map holds at most 60 symbols. Past that the mapper keeps the changed symbols, then what breaks, then what needs review, then the nearest dependents.
 - The graph draws the links between neighboring layers. Two files linked within a layer, or across more than one, are lit when either is selected, with no line drawn between them.
+- The links between two layers share one row, so where they overlap they read as one. Selecting a file lights its own.
 - A name is drawn one cell a character, so a name written in characters two cells wide pushes its row out of line.
 - Ripple needs git and at least one commit, and maps one repository at a time.
 
