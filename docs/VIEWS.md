@@ -95,7 +95,7 @@ The map and the list are each drawn by a surface module, `ripple/hooks/pane.tsx`
 
 The wheel reaches the hooks module as `ui.scroll`, with the row of the pane it was over. A turn over the map scrolls the map, and one over the list or below it scrolls the list. When the pane is too short for all it draws, the turn is left to the engine, which scrolls the pane.
 
-The keys are Buttons the hooks module draws under the list, which work whenever the pane has the keyboard; the arrow keys reach the map or the list only after a click on it. The pane asks for the keyboard when the person opens it, and not when a map arrives.
+The keys are Buttons the hooks module draws under the list, which work whenever the pane has the keyboard; the arrow keys reach the map or the list only after a click on it. A press is answered by a `ui.press` hook and not by the Button's own closure, which the engine runs beneath the mod's hooks: a mapper started from there would not be the mod's to guard. The pane asks for the keyboard when the person opens it, and not when a map arrives.
 
 The `view` option in the plugin's manifest picks the view a map opens in, and the `t` key switches for the rest of the session. The `scroll` option picks how the graph scrolls.
 

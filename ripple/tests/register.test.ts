@@ -74,6 +74,8 @@ const world = (on: On, options: { stored?: Record<string, unknown>; isWindows?: 
     toasts: [] as string[],
     prompts: [] as string[],
     opened: [] as string[],
+    /** The presses that reached what lies beneath the plugin. */
+    pressed: [] as string[],
     /** Whether each opening of the pane asked for the keyboard. */
     askedFocus: [] as boolean[],
     closed: [] as string[],
@@ -158,6 +160,10 @@ const world = (on: On, options: { stored?: Record<string, unknown>; isWindows?: 
     return { value: undefined }
   })
   on('ui.log', () => ({ value: undefined }))
+  on('ui.press', ($, e) => {
+    seen.pressed.push(e.element)
+    return { element: e.element }
+  })
   on('ui.open', ($, e) => {
     seen.opened.push(e.id)
     seen.askedFocus.push(e.focus === true)
@@ -795,6 +801,15 @@ test('the pane asks for the keyboard when the person opens it, and never when a 
   await ripple($)
   await report($, 'mapper-1')
   expect(seen.askedFocus).toEqual([true, false])
+})
+
+test('the pane answers its own keys, so nothing they start runs beneath the plugin\'s hooks', async ($, on) => {
+  const seen = await mapped($, on)
+  const pane = await mountPane($)
+  for (const key of ['l', 'u', '2']) await pane.press({ key })
+  expect(seen.spawned).toHaveLength(2)
+  expect(seen.pressed).toEqual([])
+  await pane.unmount()
 })
 
 test('every letter the pane binds only moves the view: what starts a turn, a mapper, or a browser is a digit', async ($, on) => {

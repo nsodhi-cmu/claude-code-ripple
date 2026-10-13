@@ -356,10 +356,10 @@ const scrollSymbols = async ($: EngineInterface, by: number): Promise<void> => {
 }
 
 /**
- * Does what one key of the pane does: a Button's hotkey, or a key the map or
- * the list was handed. A move from file to file, and a jump to what is
- * flagged, give the windows back to the selection; in the list, up and down
- * go through the file's symbols.
+ * Does what one key of the pane does: a Button's, or a key the map or the
+ * list was handed. A move from file to file, and a jump to what is flagged,
+ * give the windows back to the selection; in the list, up and down go through
+ * the file's symbols.
  */
 const press = async ($: EngineInterface, key: string, isInList = false): Promise<void> => {
   try {
@@ -501,6 +501,15 @@ export const register: Register = (on, options) => {
     return done
   })
 
+  /**
+   * Answers the pane's keys. A Button's own closure runs beneath this
+   * module's hooks, where a mapper it started would be out of their reach.
+   */
+  on('ui.press', { plugin: 'ripple', component: 'Pane', requestId: 'ripple' }, async ($, e) => {
+    await press($, e.element)
+    return { element: e.element }
+  })
+
   on('ui.message', async ($, e, next) => {
     if (e.requestId !== PANE || typeof e.data !== 'object' || e.data === null) return next(e)
     const { select, scroll, key } = e.data as { select?: unknown; scroll?: unknown; key?: unknown }
@@ -546,7 +555,7 @@ export const register: Register = (on, options) => {
         hotkey={key}
         plain
         {...(isDim ? { dimColor: true } : {})}
-        onPress={() => void press($, key)}
+        onPress={() => undefined}
       />
     )
 
