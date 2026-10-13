@@ -25,6 +25,7 @@ ripple/hooks/
   changes.ts      what /ripple was asked, and the changes as git reports them
   mapper.ts       the mapper's prompts, and what asking Claude about a node submits
   map.ts          reading a report into a map, and describing it
+  files.ts        the map by file
   graph.ts        the graph view
   tree.ts         the tree view
   view.ts         the selection, the keys, and how the pane's rows are shared out

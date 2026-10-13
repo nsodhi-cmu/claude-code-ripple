@@ -45,6 +45,17 @@ An edge stands as reported unless it was reported backward, which `settle` takes
 
 A map holds at most `MAX_NODES` nodes. Past that the changed symbols are kept first, then what breaks, then what needs review, then the rest by depth, and the edges of what was cut go with it. What is left is then measured again, so a map reads back from the store exactly as it was drawn.
 
+## By File
+
+A map is of symbols, and a person finds their way by file. `filesOf` in `ripple/hooks/files.ts` groups the map's symbols by the file they are in.
+
+- A file holds its symbols in the order of their lines.
+- A file is `changed` when any of its symbols is, else a `dependent` when any is, else a `dependency`.
+- A file's depth is counted in files, not symbols: the changed files are at 0, the files linked to them at 1, and so on outward, the files that use the change on one side and the files it uses on the other. A file no link ties to the change stands where the nearest of its symbols does.
+- A file's risk is the worst among its symbols.
+- Two files are linked when a symbol of one uses a symbol of the other. A use within one file is no link.
+- A file is called by the last part of its path, with as many folders before it as tell it from the map's other files: `invoice.ts` twice becomes `src/invoice.ts` and `pages/invoice.ts`.
+
 ## What The Person Reads
 
 `headerText`, `originText`, and `statusText` write the pane's first two lines and the status line under the prompt. The status line speaks only while a mapper is at work, or while the map on hand is still of the changes as they stand and has something flagged.
