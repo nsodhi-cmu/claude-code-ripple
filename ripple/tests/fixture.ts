@@ -20,7 +20,8 @@ const node = (
 
 /**
  * A shop after `formatPrice` gained a currency parameter: four functions use
- * it, two pages use two of those, and it uses two helpers itself.
+ * it, each in a file of its own, two pages use two of those, and it uses two
+ * helpers that share a file.
  */
 export const SHOP_MAP: RippleMap = {
   method: 'lsp',
@@ -52,8 +53,8 @@ export const SHOP_MAP: RippleMap = {
     }),
     node('CheckoutPage', 'src/pages/checkout.ts', 5, { depth: 2 }),
     node('InvoicePage', 'src/pages/invoice.ts', 5, { depth: 2 }),
-    node('toFixed2', 'src/price.ts', 9, { role: 'dependency' }),
-    node('currencySymbol', 'src/price.ts', 13, { role: 'dependency' }),
+    node('toFixed2', 'src/money.ts', 9, { role: 'dependency' }),
+    node('currencySymbol', 'src/money.ts', 3, { role: 'dependency' }),
   ],
   edges: [
     { from: 'src/cart.ts:renderCart', to: 'src/price.ts:formatPrice' },
@@ -62,8 +63,8 @@ export const SHOP_MAP: RippleMap = {
     { from: 'src/email.ts:emailReceipt', to: 'src/price.ts:formatPrice' },
     { from: 'src/pages/checkout.ts:CheckoutPage', to: 'src/cart.ts:renderCart' },
     { from: 'src/pages/invoice.ts:InvoicePage', to: 'src/invoice.ts:renderInvoice' },
-    { from: 'src/price.ts:formatPrice', to: 'src/price.ts:toFixed2' },
-    { from: 'src/price.ts:formatPrice', to: 'src/price.ts:currencySymbol' },
+    { from: 'src/price.ts:formatPrice', to: 'src/money.ts:toFixed2' },
+    { from: 'src/price.ts:formatPrice', to: 'src/money.ts:currencySymbol' },
   ],
 }
 

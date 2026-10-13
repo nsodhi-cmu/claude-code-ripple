@@ -113,8 +113,8 @@ describe('the drawing', () => {
       '│  └─ ○ InvoicePage   src/pages/invoice.ts:5',
       '├─ ○ priceLabel       src/ui.ts:4',
       '├─ ▲ emailReceipt     src/email.ts:6           review',
-      '├─ → toFixed2         src/price.ts:9',
-      '└─ → currencySymbol   src/price.ts:13',
+      '├─ → toFixed2         src/money.ts:9',
+      '└─ → currencySymbol   src/money.ts:3',
     ])
   })
 
@@ -132,7 +132,7 @@ describe('the drawing', () => {
       nodes: SHOP_MAP.nodes.map(one => (one.role === 'dependency' ? { ...one, isTested: false } : one)),
     }
     expect(rowText(drawTree(untestedHelper, null, { columns: 90, rows: 40 }).rows[7] ?? [])).toBe(
-      '├─ → toFixed2         src/price.ts:9',
+      '├─ → toFixed2         src/money.ts:9',
     )
   })
 
@@ -177,7 +177,7 @@ describe('the drawing', () => {
 
     const bottom = drawTree(SHOP_MAP, id('currencySymbol'), { columns: 90, rows: 6 }).rows.map(rowText)
     expect(bottom[0]).toBe('↑ 4 more above')
-    expect(bottom.at(-1)).toBe('└─ → currencySymbol   src/price.ts:13')
+    expect(bottom.at(-1)).toBe('└─ → currencySymbol   src/money.ts:3')
   })
 
   test('a tree one row too tall loses one node to the line that says so, not two', () => {
