@@ -8,7 +8,7 @@ import { rowText } from '../hooks/draw'
 import type { Hit } from '../hooks/draw'
 import { filesOf } from '../hooks/files'
 import { NO_ASKING } from '../hooks/mapper'
-import { VIEWS } from '../hooks/view'
+import { viewsOf } from '../hooks/view'
 
 // The whole loop through the engine: /ripple reads the changes from git and
 // starts a mapper, the mapper's report becomes the map, and the pane draws it.
@@ -262,7 +262,8 @@ const ORIGIN = { x: 0, y: 0 }
 const id = (name: string): string => SHOP_MAP.nodes.find(one => one.name === name)?.id ?? ''
 
 /** The shop's graph as the pane first draws it in a room `columns` wide and tall enough for all of it. */
-const graphIn = (columns: number) => VIEWS.graph.draw(SHOP, id('renderCart'), { columns, rows: 40 }, ORIGIN)
+const graphIn = (columns: number, scroll: 'pinned' | 'sheet' = 'pinned') =>
+  viewsOf(scroll).graph.draw(SHOP, id('renderCart'), { columns, rows: 40 }, ORIGIN)
 
 /** Where the box of the file that holds symbol `name` is in the pane's graph. */
 const boxOf = (name: string): Hit => {
@@ -716,6 +717,15 @@ test('a click on a count scrolls the map and leaves the selection alone; the nex
   await pane.press({ key: 'l' })
   expect(await selectedFile(pane)).toBe('src/invoice.ts')
   expect((await mapRows(pane))[6]).toContain('║ ● src/invoice.ts ║')
+  await pane.unmount()
+})
+
+test('with the scroll option set to sheet, the layers lie on one sheet', { options: { scroll: 'sheet' } }, async ($, on) => {
+  await mapped($, on)
+  const pane = await mountPane($, { ...PANE, bodyColumns: 44, scroll: { offset: 0, bodyRows: 60 } })
+  const rows = await mapRows(pane)
+  expect(rows).toEqual(graphIn(44, 'sheet').rows.map(rowText))
+  expect(rows).not.toEqual(graphIn(44).rows.map(rowText))
   await pane.unmount()
 })
 

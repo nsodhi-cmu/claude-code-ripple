@@ -6,9 +6,11 @@ import { rowText } from '../hooks/draw'
 import type { Drawing, Hit, Move, Pan, Span } from '../hooks/draw'
 import { filesOf } from '../hooks/files'
 import type { FileMap } from '../hooks/files'
-import { GRAPH_COLUMNS, GRAPH_ROWS, graphView as graph, layersOf } from '../hooks/graph'
+import { GRAPH_COLUMNS, GRAPH_ROWS, graphView, layersOf } from '../hooks/graph'
 
 const SHOP = filesOf(SHOP_MAP)
+const graph = graphView('pinned')
+const sheet = graphView('sheet')
 
 const ORIGIN: Pan = { x: 0, y: 0 }
 /** A room the shop's graph fits whole, one too narrow for its longest layer, and one too short for its layers. */
@@ -291,26 +293,66 @@ describe('a layer longer than the room', () => {
       [wide(1), 'core'],
       [wide(25), 'user12'],
     ]
-    for (const columns of [GRAPH_COLUMNS, 41, 47, 59, 72, 100, 160]) {
-      for (const [map, selected] of maps) {
-        for (const x of [0, 7, 33, 400]) {
-          const room = { columns, rows: 14 }
-          const drawing = graph.draw(map, selected, room, { x, y: 3 })
-          expect(Math.max(...picture(drawing).map(row => row.length))).toBeLessThanOrEqual(columns)
-          expect(drawing.rows.length).toBeLessThanOrEqual(room.rows)
-          for (const hit of drawing.hits) {
-            expect(hit.x).toBeGreaterThanOrEqual(0)
-            expect(hit.y).toBeGreaterThanOrEqual(0)
-            expect(hit.x + hit.width).toBeLessThanOrEqual(columns)
-            expect(hit.y + hit.height).toBeLessThanOrEqual(drawing.rows.length)
+    for (const view of [graph, sheet]) {
+      for (const columns of [GRAPH_COLUMNS, 41, 47, 59, 72, 100, 160]) {
+        for (const [map, selected] of maps) {
+          for (const x of [0, 7, 33, 400]) {
+            const room = { columns, rows: 14 }
+            const drawing = view.draw(map, selected, room, { x, y: 3 })
+            expect(Math.max(...picture(drawing).map(row => row.length))).toBeLessThanOrEqual(columns)
+            expect(drawing.rows.length).toBeLessThanOrEqual(room.rows)
+            for (const hit of drawing.hits) {
+              expect(hit.x).toBeGreaterThanOrEqual(0)
+              expect(hit.y).toBeGreaterThanOrEqual(0)
+              expect(hit.x + hit.width).toBeLessThanOrEqual(columns)
+              expect(hit.y + hit.height).toBeLessThanOrEqual(drawing.rows.length)
+            }
+            const cells = boxes(drawing).flatMap(([, left, y, width]) =>
+              Array.from({ length: width }, (_, index) => `${left + index},${y}`),
+            )
+            expect(new Set(cells).size).toBe(cells.length)
           }
-          const cells = boxes(drawing).flatMap(([, left, y, width]) =>
-            Array.from({ length: width }, (_, index) => `${left + index},${y}`),
-          )
-          expect(new Set(cells).size).toBe(cells.length)
         }
       }
     }
+  })
+})
+
+describe('laid on one sheet', () => {
+  test('every layer lies across the longest, each box by what it is linked to, and all of them move together', () => {
+    expect(picture(sheet.draw(SHOP, id('renderCart'), NARROW, ORIGIN))).toEqual([
+      '┌───────────────┐  ┌────────────────────┐',
+      '│ ○ checkout.ts │  │ ○ pages/invoice.ts │',
+      '└─────┬─────────┘  └─────┬──────────────┘',
+      '      │                  │',
+      '      ▼                  ▼',
+      '╔═══════════╗  ┌──────────────────┐  ┌──────',
+      '║ ● cart.ts ║  │ ● src/invoice.ts │  │ ○ ui…',
+      '╚═════╤═════╝  └────────────────┬─┘  └────┬─',
+      '      └─────────────────────────┼─────────┴─',
+      '                                ▼',
+      '                         ┌────────────┐',
+      '                         │ ◆ price.ts │',
+      '                         └──────┬─────┘',
+      '                                │',
+      '                                ▼',
+      '                        ┌───────────────┐',
+      '                        │ → money.ts  2 │',
+      '                        └───────────────┘',
+      '                                    2 more →',
+    ])
+    const rightEdges = (x: number): Map<string, number> =>
+      new Map(boxes(sheet.draw(SHOP, id('renderCart'), NARROW, { x, y: 0 })).map(([symbol, left, , width]) => [symbol, left + width]))
+    const [before, after] = [rightEdges(0), rightEdges(12)]
+    for (const name of ['CheckoutPage', 'InvoicePage', 'renderCart', 'renderInvoice', 'formatPrice', 'currencySymbol']) {
+      expect(after.get(id(name))).toBe((before.get(id(name)) ?? 0) - 12)
+    }
+  })
+
+  test('the window goes to the selected file wherever on the sheet it is', () => {
+    expect(sheet.show(SHOP, id('emailReceipt'), NARROW, ORIGIN)).toEqual({ x: 20, y: 0 })
+    expect(sheet.show(SHOP, id('formatPrice'), NARROW, { x: 20, y: 0 })).toEqual({ x: 19, y: 0 })
+    expect(sheet.show(SHOP, id('CheckoutPage'), NARROW, { x: 20, y: 0 })).toEqual({ x: 0, y: 0 })
   })
 })
 

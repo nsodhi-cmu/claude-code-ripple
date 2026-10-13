@@ -43,7 +43,10 @@ The window stands where the person scrolled it until the selection next moves fr
 
 A box is a border, a label, and a border. The label is the file's mark and name, and a count of its symbols when it holds more than one. A name too long for a box is cut in its middle, which keeps how it starts and its extension. Between two layers are a row the links run along, where they meet in box-drawing junctions, and a row of arrowheads. A link runs straight down where the box above reaches over the one below.
 
-A layer that fits the room is seated in it: the layer of the change centered, and every other layer against the one it was ordered by, each box as near as it can be to the middle of the boxes it is linked to. A layer longer than the room runs on from the left edge. Every layer slides under the window by the same amount, each no farther than its own end, so a layer that fits never moves and the links are drawn to wherever the boxes then stand.
+The `scroll` option picks how the layers are laid out across.
+
+- **`pinned`.** A layer that fits the room is seated in it: the layer of the change centered, and every other layer against the one it was ordered by, each box as near as it can be to the middle of the boxes it is linked to. A layer longer than the room runs on from the left edge. Every layer slides under the window by the same amount, each no farther than its own end, so a layer that fits never moves and the links are drawn to wherever the boxes then stand.
+- **`sheet`.** Every layer is seated across the longest one's width, each box by the boxes it is linked to, and the window moves over all of them alike.
 
 The window moves by cells both ways. A box the window's edge cuts ends there in an ellipsis, and a link to a box out of view runs off the edge. The wheel scrolls along the map or down it, whichever way has more rooms' worth out of view.
 
@@ -94,7 +97,7 @@ The wheel reaches the hooks module as `ui.scroll`, with the row of the pane it w
 
 The keys are Buttons the hooks module draws under the list, which work whenever the pane has the keyboard; the arrow keys reach the map or the list only after a click on it. The pane asks for the keyboard when the person opens it, and not when a map arrives.
 
-The `view` option in the plugin's manifest picks the view a map opens in, and the `t` key switches for the rest of the session.
+The `view` option in the plugin's manifest picks the view a map opens in, and the `t` key switches for the rest of the session. The `scroll` option picks how the graph scrolls.
 
 ## The Rings
 

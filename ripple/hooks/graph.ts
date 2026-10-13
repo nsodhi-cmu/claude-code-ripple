@@ -9,6 +9,14 @@ import { rankOf } from './map'
 // between neighboring layers drawn in box characters. The layers are laid out
 // once, in an order that never changes, and seen through a window that moves.
 
+/**
+ * How a graph wider than its room scrolls. `pinned`: each layer slides only
+ * as far as it is long, so one that fits the room stays in view. `sheet`: the
+ * layers lie on one sheet as wide as the longest, each box by what it is
+ * linked to, and the sheet moves whole.
+ */
+export type GraphScroll = 'pinned' | 'sheet'
+
 /** The most characters of a file's name a box shows. */
 const NAME_CHARS = 24
 /** What a box adds to its label: a space and a border on each side. */
@@ -77,8 +85,8 @@ type Box = { file: MapFile; x: number; width: number }
 
 /**
  * One layer as it is laid out: its boxes, the columns they take side by
- * side, and the columns they are laid out across: the room's, or their own
- * when they are more, which the window then slides over.
+ * side, and the columns they are laid out across, which the window slides
+ * over when they are more than the room's.
  */
 type Shelf = { boxes: Box[]; width: number; across: number }
 
@@ -120,12 +128,12 @@ function seat(shelf: Shelf, columns: number, beside: Box[], isBeside: (box: Box,
 }
 
 /**
- * Lays the map out. A shelf that fits across the room is seated in it, the
- * changed files first and each other shelf against the one nearer them. A
- * shelf that does not fit runs on from the left edge, to be slid under the
- * window.
+ * Lays the map out: the changed files first, then each other shelf against
+ * the one nearer them where the two are laid out across the same columns.
+ * Pinned, that is the room's for every shelf that fits it, and a longer shelf
+ * runs on alone from the left edge.
  */
-function layoutOf(map: FileMap, room: Room): Layout {
+function layoutOf(map: FileMap, room: Room, scroll: GraphScroll): Layout {
   const columns = Math.max(room.columns, GRAPH_COLUMNS)
   const layers = layersOf(map)
   const shelves: Shelf[] = layers.map(layer => {
@@ -135,8 +143,10 @@ function layoutOf(map: FileMap, room: Room): Layout {
       x += box.width + BOX_GAP
       return box
     })
-    return { boxes, width: x - BOX_GAP, across: Math.max(columns, x - BOX_GAP) }
+    return { boxes, width: x - BOX_GAP, across: columns }
   })
+  const widest = Math.max(columns, ...shelves.map(shelf => shelf.width))
+  for (const shelf of shelves) shelf.across = scroll === 'sheet' ? widest : Math.max(columns, shelf.width)
   const middle = Math.max(
     0,
     layers.findIndex(layer => layer.some(file => file.role === 'changed')),
@@ -169,7 +179,7 @@ const within = (pan: Pan, most: Pan): Pan => ({
   y: Math.min(Math.max(pan.y, 0), most.y),
 })
 
-/** How far a shelf has slid under a window at `x`: with it, as far as the shelf's own end. */
+/** How far a shelf has slid under a window at `x`: with it, as far as the end of what the shelf is laid out across. */
 const slideOf = (layout: Layout, shelf: Shelf, x: number): number => Math.min(x, shelf.across - layout.columns)
 
 /** Where the selected file's box is: its shelf's place among the shelves, the shelf, and the box. */
@@ -434,9 +444,12 @@ function step(layout: Layout, map: FileMap, selected: string | null, move: Move,
   return (to === undefined ? undefined : symbolIn(to.file, null)?.id) ?? selected
 }
 
-export const graphView: View = {
-  draw: (map, selected, room, pan) => draw(layoutOf(map, room), map, selected, room, pan),
-  show: (map, selected, room, from) => show(layoutOf(map, room), map, selected, room, from),
-  scroll: (map, room, from, by) => scroll(layoutOf(map, room), room, from, by),
-  step: (map, selected, move, room, pan) => step(layoutOf(map, room), map, selected, move, room, pan),
+/** The graph view, scrolling as `how` says. */
+export function graphView(how: GraphScroll): View {
+  return {
+    draw: (map, selected, room, pan) => draw(layoutOf(map, room, how), map, selected, room, pan),
+    show: (map, selected, room, from) => show(layoutOf(map, room, how), map, selected, room, from),
+    scroll: (map, room, from, by) => scroll(layoutOf(map, room, how), room, from, by),
+    step: (map, selected, move, room, pan) => step(layoutOf(map, room, how), map, selected, move, room, pan),
+  }
 }

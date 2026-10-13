@@ -4,7 +4,7 @@ import type { RippleMap } from '../types'
 import { SHOP_MAP } from './fixture'
 import { filesOf } from '../hooks/files'
 import { GRAPH_COLUMNS, GRAPH_ROWS } from '../hooks/graph'
-import { VIEWS, factsOf, flowRows, modeIn, nextFlagged, planOf, selectedOf, wrappedRows } from '../hooks/view'
+import { factsOf, flowRows, modeIn, nextFlagged, planOf, selectedOf, viewsOf, wrappedRows } from '../hooks/view'
 
 const id = (name: string): string => node(name).id
 
@@ -55,8 +55,17 @@ describe('the views', () => {
   const origin = { x: 0, y: 0 }
 
   test('the same key means each view\'s own direction: down a layer in the graph, down a row in the tree', () => {
-    expect(VIEWS.graph.step(shop, id('formatPrice'), 'down', room, origin)).toBe(id('currencySymbol'))
-    expect(VIEWS.tree.step(shop, id('formatPrice'), 'down', room, origin)).toBe(id('renderCart'))
+    const views = viewsOf('pinned')
+    expect(views.graph.step(shop, id('formatPrice'), 'down', room, origin)).toBe(id('currencySymbol'))
+    expect(views.tree.step(shop, id('formatPrice'), 'down', room, origin)).toBe(id('renderCart'))
+  })
+
+  test('the graph scrolls as it is told to, and the tree is the same tree either way', () => {
+    const narrow = { columns: 44, rows: 40 }
+    const [pinned, sheet] = [viewsOf('pinned'), viewsOf('sheet')]
+    expect(pinned.graph.show(shop, id('formatPrice'), narrow, { x: 20, y: 0 })).toEqual({ x: 20, y: 0 })
+    expect(sheet.graph.show(shop, id('formatPrice'), narrow, { x: 20, y: 0 })).toEqual({ x: 19, y: 0 })
+    expect(sheet.tree).toBe(pinned.tree)
   })
 
   test('a room too narrow or too short for the graph gets the tree instead', () => {

@@ -39,7 +39,7 @@ import {
   reportReply,
   taskPrompt,
 } from './mapper'
-import { LIST_MOVES, MOVES, VIEWS, factsOf, modeIn, nextFlagged, planOf, selectedOf } from './view'
+import { LIST_MOVES, MOVES, factsOf, modeIn, nextFlagged, planOf, selectedOf, viewsOf } from './view'
 import { graphHtml, ringSvg } from './web'
 
 const PANE = 'ripple'
@@ -71,6 +71,8 @@ const view = atom({ plugin: 'ripple', key: 'view' } as const, { mode: null, sele
 
 /** The view the map opens in until the person switches: the plugin's `view` option. */
 let firstMode: RippleMode = 'graph'
+/** The views of the map, the graph scrolling as the plugin's `scroll` option says. */
+let views = viewsOf('pinned')
 /**
  * What the pane last drew, which a key or a turn of the wheel goes on from:
  * the view it drew the map in (the tree, wherever the graph had no room), the
@@ -339,7 +341,7 @@ const isPan = (value: unknown): value is Pan =>
 const scrollMap = async ($: EngineInterface, by: Pan | number): Promise<void> => {
   const held = await read($, map)
   if (held === null) return
-  const pan = VIEWS[shown.mode].scroll(filesOf(held), shown.room, shown.pan, by)
+  const pan = views[shown.mode].scroll(filesOf(held), shown.room, shown.pan, by)
   await update($, view, seen => ({ ...seen, pan }))
 }
 
@@ -371,7 +373,7 @@ const press = async ($: EngineInterface, key: string, isInList = false): Promise
     if (listMove !== undefined) {
       if (file !== undefined) await update($, view, seen => ({ ...seen, selected: stepInList(file, at, listMove), top: null }))
     } else if (move !== undefined) {
-      const selected = VIEWS[shown.mode].step(files, at, move, shown.room, shown.pan)
+      const selected = views[shown.mode].step(files, at, move, shown.room, shown.pan)
       await update($, view, seen => ({ ...seen, selected, pan: null, top: null }))
     } else if (key === 'n') {
       await update($, view, seen => ({ ...seen, selected: nextFlagged(held, at), pan: null, top: null }))
@@ -391,6 +393,7 @@ const press = async ($: EngineInterface, key: string, isInList = false): Promise
 
 export const register: Register = (on, options) => {
   firstMode = options.view === 'tree' ? 'tree' : 'graph'
+  views = viewsOf(options.scroll === 'sheet' ? 'sheet' : 'pinned')
 
   on('session.start', async ($, e, next) => {
     try {
@@ -596,9 +599,9 @@ export const register: Register = (on, options) => {
 
     let drawn: RenderElement | false = false
     if (files !== undefined && file !== undefined && node !== undefined && hasNodes) {
-      const pan = seen.pan ?? VIEWS[mode].show(files, node.id, room, shown.pan)
+      const pan = seen.pan ?? views[mode].show(files, node.id, room, shown.pan)
       const top = seen.top ?? showInList(file, node.id, plan.listRows, shown.top)
-      const picture = VIEWS[mode].draw(files, node.id, room, pan)
+      const picture = views[mode].draw(files, node.id, room, pan)
       shown = { mode, room, pan, listRows: plan.listRows, top, listAt: plan.mapTop + picture.rows.length + gap }
       drawn = (
         <Box flexDirection="column" marginTop={gap}>

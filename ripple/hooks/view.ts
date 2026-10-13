@@ -1,6 +1,7 @@
 import type { RippleMode, RippleNode, RippleReport } from '../types'
 import type { Move, Room, View } from './draw'
 import { GRAPH_COLUMNS, GRAPH_ROWS, graphView } from './graph'
+import type { GraphScroll } from './graph'
 import { flagged, neighborsOf } from './map'
 import { treeView } from './tree'
 
@@ -22,7 +23,10 @@ export const MOVES: Readonly<Record<string, Move>> = {
 /** The keys that move the selection up and down the selected file's symbols. */
 export const LIST_MOVES: Readonly<Record<string, Move>> = { u: 'up', d: 'down' }
 
-export const VIEWS: Readonly<Record<RippleMode, View>> = { graph: graphView, tree: treeView }
+/** The views of the map, the graph scrolling as `scroll` says. */
+export function viewsOf(scroll: GraphScroll): Readonly<Record<RippleMode, View>> {
+  return { graph: graphView(scroll), tree: treeView }
+}
 
 /** The selected symbol: the one `selected` names while the map still holds it, else where a reader starts. */
 export function selectedOf(report: RippleReport, selected: string | null): RippleNode | undefined {

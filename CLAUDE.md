@@ -19,7 +19,7 @@ There is no build and nothing to install. To type-check, load the mod once so th
 
 ```
 .claude-plugin/marketplace.json   the marketplace that lists the plugin
-ripple/.claude-plugin/plugin.json the manifest, and the one setting
+ripple/.claude-plugin/plugin.json the manifest, and the settings
 ripple/hooks/
   register.tsx    every hook, and everything that touches the engine
   changes.ts      what /ripple was asked, and the changes as git reports them

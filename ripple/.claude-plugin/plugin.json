@@ -27,6 +27,16 @@
         "tree"
       ],
       "default": "graph"
+    },
+    "scroll": {
+      "type": "string",
+      "title": "Graph scrolling",
+      "description": "How a graph wider than the pane scrolls: pinned slides the long rows and keeps the ones that fit in view; sheet lays every row on one wide sheet and moves it whole.",
+      "options": [
+        "pinned",
+        "sheet"
+      ],
+      "default": "pinned"
     }
   }
 }

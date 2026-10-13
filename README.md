@@ -137,7 +137,14 @@ Where there is no room for a graph at all, the pane draws the tree, a row a file
 
 In the tree `j` and `k` go down and up the rows, `h` goes to the file a row hangs under, and `l` to the first that hangs under it.
 
-To open on the tree every time, set **Default view** to `tree` in `/config`, or run `/plugin configure ripple@claude-code-ripple`.
+#### Settings
+
+Both are in `/config`, or `/plugin configure ripple@claude-code-ripple`.
+
+| Setting | What it picks |
+| :- | :- |
+| **Default view** | Whether a map opens as the `graph` or as the `tree`. |
+| **Graph scrolling** | How a graph wider than the pane scrolls. `pinned`, as above, slides the long layers and keeps the ones that fit in view. `sheet` lays every layer on one sheet as wide as the longest, each box by the boxes it is linked to, and moves the sheet whole. |
 
 The desktop app, the VS Code extension, and the mobile app draw the map as a still ring picture in place of the graph, with nothing to select: the two buttons under it map again and write the web page.
 

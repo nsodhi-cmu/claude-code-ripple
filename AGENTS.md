@@ -47,7 +47,7 @@
 
 - Write simple code that reads as a plain description of what it does: prefer the obvious approach over the clever one. Fewer lines is a soft priority.
 - Prefer OS-agnostic code; where a platform split is unavoidable, isolate it in one function.
-- Avoid options, flags, and knobs. The view the map opens in is the only setting.
+- Avoid options, flags, and knobs. The settings are the view the map opens in and how a graph wider than the pane scrolls.
 - Prefer making illegal states unrepresentable over documenting that they are illegal.
 - A mapping never edits code, never asks for permission, and never speaks in the conversation unless the person asks it to.
 
