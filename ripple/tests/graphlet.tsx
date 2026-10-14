@@ -6,7 +6,7 @@ import type { Plugin } from 'claude-code/testing'
  * and a Button a node, whose press is the person picking that node, and a
  * Button for each of a few keys, whose press is that key pressed over the
  * graph. A move steps along the order the nodes were given in, and up and
- * down a link.
+ * down a link. In a room 66 columns wide it fails.
  */
 export const GRAPHLET: Plugin = {
   name: 'graphlet',
@@ -21,6 +21,8 @@ export const GRAPHLET: Plugin = {
     }
     /** The rows the stand-in says any graph needs, and takes of the room it is given. */
     const ROWS = 18
+    /** The one width of room the stand-in fails in, as a mod with a fault would. */
+    const BROKEN_COLUMNS = 66
     const shown = new Map<string, Shown>()
 
     on('engine.create', async (_, e, next) => {
@@ -28,7 +30,10 @@ export const GRAPHLET: Plugin = {
       return {
         ...built,
         graphlet: {
-          measure: async (input: { columns: number }) => ({ columns: input.columns, rows: ROWS }),
+          measure: async (input: { columns: number }) => {
+            if (input.columns === BROKEN_COLUMNS) throw new Error('graphlet is broken')
+            return { columns: input.columns, rows: ROWS }
+          },
           show: async (input: Shown) => {
             shown.set(input.pane, input)
             return { rows: Math.min(ROWS, input.rows), selected: input.selected ?? null }

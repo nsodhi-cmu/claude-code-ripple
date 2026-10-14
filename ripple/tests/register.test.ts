@@ -750,6 +750,15 @@ test('with the view option set to tree, the map opens as a tree', { options: { v
   await pane.unmount()
 })
 
+test('where graphlet fails to draw the graph, the pane draws the tree', async ($, on) => {
+  await mapped($, on)
+  const pane = await mountPane($, { ...PANE, bodyColumns: 66 })
+  expect((await treeRows(pane))[0]).toStartWith('◆ src/price.ts')
+  expect(await handed(pane)).toBeUndefined()
+  expect(await selectedFile(pane)).toBe('src/cart.ts')
+  await pane.unmount()
+})
+
 test('a pane too narrow for the graph draws the tree', async ($, on) => {
   await mapped($, on)
   const narrow = await mountPane($, { ...PANE, bodyColumns: 36 })

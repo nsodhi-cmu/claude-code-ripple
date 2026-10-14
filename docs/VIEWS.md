@@ -60,7 +60,7 @@ The pane's `ui.render` hook asks graphlet how many rows the graph needs, shares 
 - A hook on `graphlet.key` hears every other key pressed over the graph, and does what the pane's own key does.
 - `h` `j` `k` `l` ask `$.graphlet.step` where the move lands, and a turn of the wheel over the graph is passed to `$.graphlet.scroll`.
 
-A room narrower than `GRAPH_COLUMNS` or shorter than `GRAPH_ROWS` has no graph: `modeIn` answers the tree for it.
+A room narrower than `GRAPH_COLUMNS` or shorter than `GRAPH_ROWS` has no graph: `modeIn` answers the tree for it. So does a graph graphlet fails on: the pane draws the tree, and the failure goes to the debug log.
 
 ## The Tree
 

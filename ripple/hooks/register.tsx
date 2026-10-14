@@ -605,13 +605,19 @@ export const register: Register = (on, options) => {
     const node = hasNodes ? selectedOf(held, seen.selected) : undefined
     const file = files === undefined ? undefined : fileOf(files, node?.id ?? null)
     const graph = files === undefined ? undefined : graphOf(files)
-    const asked = modeIn(seen.mode ?? firstMode, { columns, rows: WHOLE_ROWS })
-    const mapNeeds =
-      files === undefined || graph === undefined
-        ? 0
-        : asked === 'graph'
-          ? (await $.graphlet.measure({ graph, columns })).rows
-          : treeView.draw(files, null, { columns, rows: WHOLE_ROWS }, ORIGIN).rows.length
+    let asked = modeIn(seen.mode ?? firstMode, { columns, rows: WHOLE_ROWS })
+    let mapNeeds = 0
+    if (graph !== undefined && asked === 'graph') {
+      try {
+        mapNeeds = (await $.graphlet.measure({ graph, columns })).rows
+      } catch (error) {
+        asked = 'tree'
+        $.ui.log(`ripple: graphlet could not draw the graph: ${describe(error)}`, { to: 'debug' })
+      }
+    }
+    if (files !== undefined && asked === 'tree') {
+      mapNeeds = treeView.draw(files, null, { columns, rows: WHOLE_ROWS }, ORIGIN).rows.length
+    }
     const plan = planOf(
       { columns, rows: e.props.scroll.bodyRows },
       {
