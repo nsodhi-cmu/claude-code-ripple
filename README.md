@@ -62,6 +62,14 @@ Answer `y` to add the marketplace, then pick a scope. The same in two steps:
 
 Ripple's marketplace lists graphlet beside it, so the one install brings both. Ripple does not load without graphlet: disable or remove graphlet and `/plugin` shows Ripple as missing a dependency.
 
+An update does not bring graphlet in by itself. A copy of Ripple installed before it drew with graphlet is updated in a shell, and then installed again over itself, which adds what it now depends on:
+
+```
+claude plugin marketplace update claude-code-ripple
+claude plugin update ripple@claude-code-ripple
+claude plugin install ripple@claude-code-ripple
+```
+
 ## Using It
 
 Change something, or ask Claude to, then run `/ripple`.
