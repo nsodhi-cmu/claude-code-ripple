@@ -162,7 +162,7 @@ How a graph is drawn is graphlet's to set, for every graph any mod draws with it
 | :- | :- |
 | **Scrolling** | How a graph wider than the pane scrolls. `pinned`, as above, slides the long layers and keeps the ones that fit in view. `sheet` lays every layer on one sheet as wide as the longest, each box by the boxes it is linked to, and moves the sheet whole. |
 | **Long labels** | What becomes of a name too long for one line of its box. `wrap` breaks it onto more lines. `clip` keeps it to one, cut in the middle. |
-| **Links** | How the links between two layers share the rows there. `separate` gives each file's links a row of their own wherever they would run into another's. `merged` runs them all along one row, which is shorter; selecting a file shows which links are its own. |
+| **Links** | How the links between two layers share the rows there. `separate` gives each file's links a row of their own wherever they would run into another's, and each file an arrowhead for each set of files whose links reach it. `merged` runs them all along one row into one arrowhead a file, which is shorter; selecting a file shows which links are its own. |
 
 The desktop app, the VS Code extension, and the mobile app draw the map as a still ring picture in place of the graph, with nothing to select: the button under it maps again.
 
@@ -232,7 +232,7 @@ It writes no file in your project, runs no program but git, and makes no network
 - A map is a reading of the code, not a proof. Uses through dynamic dispatch, reflection, or strings can be missed, most of all when the map is `via text search`.
 - A mapping is one agent run, which costs what any subagent costs. It runs only when you ask.
 - A map holds at most 60 symbols. Past that the mapper keeps the changed symbols, then what breaks, then what needs review, then the nearest dependents.
-- Links to one file meet at its one arrowhead, and where the links between two layers are too tangled to be kept apart, some share a stretch of line. Selecting a file lights its own.
+- Where the links between two layers are too tangled to be kept apart, two of them may share a stretch of line. Selecting a file lights its own.
 - A name is drawn one cell a character, so a name written in characters two cells wide pushes its row out of line.
 - Ripple needs git and at least one commit, and maps one repository at a time.
 
