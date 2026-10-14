@@ -11,10 +11,10 @@
 
 ## Code Structure
 
-- The repository is a plugin marketplace with one plugin in it. `.claude-plugin/marketplace.json` lists the plugin, and `ripple/` is the plugin.
+- The repository is a plugin marketplace. `.claude-plugin/marketplace.json` lists the plugin, which is `ripple/`, and graphlet, the mod it depends on, which lives in a repository of its own.
 - `ripple/hooks/register.tsx` is the only file that touches the engine. `ripple/hooks/pane.tsx` is the pane's surface module: it paints what it is handed and posts what the person did, and decides nothing. Every other file in `ripple/hooks/` is pure: data in, data out, with nothing awaited.
 - `ripple/types/index.d.ts` is the mod's contract: the map's types and the session state. It imports nothing.
-- Tests live in `ripple/tests/`, one file for each file of `ripple/hooks/` it tests, beside a shared `fixture.ts`.
+- Tests live in `ripple/tests/`, one file for each file of `ripple/hooks/` it tests, beside a shared `fixture.ts` and `graphlet.tsx`, which stands in for graphlet.
 - `ripple/.claude-plugin/types/` is written by Claude Code and is never edited or committed.
 
 # Style
@@ -27,7 +27,7 @@
 
 ## TypeScript
 
-- No dependencies. The mod is what Claude Code loads from the folder, with no build step and no `package.json`.
+- No packages. The mod is what Claude Code loads from the folder, with no build step and no `package.json`. It depends on one other mod, graphlet, which draws the graph; nothing of graphlet's is copied here.
 - A boolean is named for the question it answers: `isStale`, `hasNodes`.
 - A constant that shapes behavior has a name and a comment that says what it bounds.
 - Whatever a model sends is read leniently and repaired where it can be. The prompts the mod sends a model are written out in `ripple/hooks/mapper.ts`, in one place.
@@ -47,7 +47,7 @@
 
 - Write simple code that reads as a plain description of what it does: prefer the obvious approach over the clever one. Fewer lines is a soft priority.
 - Prefer OS-agnostic code; where a platform split is unavoidable, isolate it in one function.
-- Avoid options, flags, and knobs. The settings are the view the map opens in and how a graph wider than the pane scrolls.
+- Avoid options, flags, and knobs. The one setting is the view the map opens in; how a graph is drawn is graphlet's to set.
 - Prefer making illegal states unrepresentable over documenting that they are illegal.
 - A mapping never edits code, never asks for permission, and never speaks in the conversation unless the person asks it to.
 

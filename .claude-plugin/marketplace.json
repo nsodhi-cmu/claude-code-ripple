@@ -13,6 +13,16 @@
       "source": "./ripple",
       "description": "See what your changes reach: a map of everything that depends on your diff, drawn inside Claude Code",
       "category": "development"
+    },
+    {
+      "name": "graphlet",
+      "source": {
+        "source": "git-subdir",
+        "url": "nsodhi-cmu/claude-code-graphlet",
+        "path": "graphlet"
+      },
+      "description": "Draws graphs of nodes and links inside Claude Code, for other mods to build on. Ripple draws its graph with it.",
+      "category": "development"
     }
   ]
 }

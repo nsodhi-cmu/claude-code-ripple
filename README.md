@@ -8,24 +8,25 @@ uncommitted changes · via LSP
 Two callers of formatPrice no longer compile, and receipts may show the wrong currency.
 ◆ changed  ● breaks  ▲ review  ○ ok  → uses
 
-           ┌───────────────┐  ┌────────────────────┐
-           │ ○ checkout.ts │  │ ○ pages/invoice.ts │
-           └────────┬──────┘  └────────┬───────────┘
-                    │                  │
-                    ▼                  ▼
-              ╔═══════════╗  ┌──────────────────┐  ┌─────────┐  ┌────────────┐
-              ║ ● cart.ts ║  │ ● src/invoice.ts │  │ ○ ui.ts │  │ ▲ email.ts │
-              ╚═════╤═════╝  └────────────────┬─┘  └────┬────┘  └──────┬─────┘
-                    └─────────────────────────┼─────────┴──────────────┘
-                                              ▼
-                                       ┌────────────┐
-                                       │ ◆ price.ts │
-                                       └──────┬─────┘
-                                              │
-                                              ▼
-                                      ┌───────────────┐
-                                      │ → money.ts  2 │
-                                      └───────────────┘
+     ┌───────────────┐  ┌────────────────────┐
+     │ ○ checkout.ts │  │ ○ pages/invoice.ts │
+     └───────┬───────┘  └───────┬────────────┘
+             │                  │
+             ▼                  ▼
+       ╔═══════════╗  ┌──────────────────┐  ┌─────────┐  ┌────────────┐
+       ║ ● cart.ts ║  │ ● src/invoice.ts │  │ ○ ui.ts │  │ ▲ email.ts │
+       ╚═════╤═════╝  └─────────────────┬┘  └────┬────┘  └──────┬─────┘
+             └──────────────────────────┼────────┴──────────────┘
+                                        ▼
+                                 ┌────────────┐
+                                 │ ◆ price.ts │
+                                 └──────┬─────┘
+                                        │
+                                        ▼
+                                ┌───────────────┐
+                                │ → money.ts  2 │
+                                └───────────────┘
+                                                                        html ↗
 
 ▸ src/cart.ts · 1 symbol · open
   ● renderCart  :14  breaks · untested
@@ -42,10 +43,11 @@ A diff shows what you changed and nothing of what it reaches. Rename a struct, a
 - **The map is of symbols**: functions, types, fields, and constants. A Claude agent does the tracing with the tools the repository already has, so no language needs setting up.
 - **The mapper works in the background**, apart from your conversation. It has no tool that edits files, and a command that would need your permission is refused, not put to you.
 - **The map is drawn by file**: a box a file, and under the map the symbols it holds in the selected file, each with its line and why it is flagged.
+- **The graph is drawn by [graphlet](https://github.com/nsodhi-cmu/claude-code-graphlet)**, a mod for drawing graphs that Ripple depends on. Installing Ripple installs it.
 
 ## Installing
 
-Ripple is tested on Claude Code 2.1.296. Mods are new and their API still changes between releases, so an older Claude Code may not load it. At the prompt of a session:
+Ripple is tested on Claude Code 2.1.299. Mods are new and their API still changes between releases, so an older Claude Code may not load it. At the prompt of a session:
 
 ```
 /plugin install ripple --marketplace nsodhi-cmu/claude-code-ripple
@@ -57,6 +59,8 @@ Answer `y` to add the marketplace, then pick a scope. The same in two steps:
 /plugin marketplace add nsodhi-cmu/claude-code-ripple
 /plugin install ripple@claude-code-ripple
 ```
+
+Ripple's marketplace lists graphlet beside it, so the one install brings both. Ripple does not load without graphlet: disable or remove graphlet and `/plugin` shows Ripple as missing a dependency.
 
 ## Using It
 
@@ -75,7 +79,7 @@ Mapping runs in the background, so you can keep working while it does. Run `/rip
 
 The pane opens beside the transcript where the terminal is wide enough for Claude Code to dock it, and above the prompt otherwise.
 
-Each box is a file, marked as the worst of its symbols is, with a count when it holds more than one. The files that use the change sit above it, and the files it uses below. One file is selected: its box is double-framed, and its links and the files they reach are lit. Under the map is the list of that file's symbols, in the order they stand in the file, each with its line. One of them is selected too, and the lines under the list say what it is, what it is linked to, and the mapper's reason for flagging it.
+Each box is a file, marked as the worst of its symbols is, with a count when it holds more than one. The files that use the change sit above it, and the files it uses below. A link runs from a file to a file it uses; one that runs back up the map, as where two files use each other, is dashed. One file is selected: its box is double-framed, and its links and the files they reach are lit. Under the map is the list of that file's symbols, in the order they stand in the file, each with its line. One of them is selected too, and the lines under the list say what it is, what it is linked to, and the mapper's reason for flagging it.
 
 | Key | What it does |
 | :- | :- |
@@ -88,7 +92,7 @@ Each box is a file, marked as the worst of its symbols is, with a count when it 
 
 The keys work while the pane has the keyboard, which it asks for when you open it. `ctrl+x tab` moves the keyboard between the pane and the prompt, and typing anything else goes back to the prompt. The keys that start something are digits, so the first letter of a prompt never sets one off.
 
-The mouse works without the keyboard. A click on a box selects its file, and a click on a row of the list selects that symbol. The wheel scrolls whichever of the two it is over. Once the map or the list has been clicked, the arrow keys move through it as the letters do.
+The mouse works without the keyboard. A click on a box selects its file, and a click on a row of the list selects that symbol. The wheel scrolls whichever of the two it is over. Once the map or the list has been clicked, the arrow keys move through it as the letters do. A click on `html ↗`, in the corner under the graph, opens the graph as a page in your browser.
 
 #### A Map Larger Than The Pane
 
@@ -98,7 +102,8 @@ The files of a layer keep one order, whatever is selected. A layer longer than t
  ┌───────────────┐  ┌────────────────────┐
  │ ○ checkout.ts │  │ ○ pages/invoice.ts │
  └───────┬───────┘  └──────────┬─────────┘
-─────────┘     ┌───────────────┘
+─────────┘                     │
+               ┌───────────────┘
                ▼
 ──┐  ┌──────────────────┐  ╔═════════╗  ┌───
 … │  │ ● src/invoice.ts │  ║ ○ ui.ts ║  │ ▲…
@@ -113,7 +118,7 @@ The files of a layer keep one order, whatever is selected. A layer longer than t
               ┌───────────────┐
               │ → money.ts  2 │
               └───────────────┘
-← 1 more                            1 more →
+← 1 more                    1 more →  html ↗
 ```
 
 The map scrolls when the selection moves out of view, and no farther than it takes to show the selected file and the start of the one past it. The wheel scrolls it without moving the selection, and so does a click on one of the counts. A layer that fits the pane stays where it is while a longer one slides, so the change stays in view as you go along the files that use it.
@@ -137,12 +142,19 @@ In the tree `j` and `k` go down and up the rows, `h` goes to the file a row hang
 
 #### Settings
 
-Both are in `/config`, or `/plugin configure ripple@claude-code-ripple`.
+Ripple has one, in `/config`, or `/plugin configure ripple@claude-code-ripple`.
 
 | Setting | What it picks |
 | :- | :- |
 | **Default view** | Whether a map opens as the `graph` or as the `tree`. |
-| **Graph scrolling** | How a graph wider than the pane scrolls. `pinned`, as above, slides the long layers and keeps the ones that fit in view. `sheet` lays every layer on one sheet as wide as the longest, each box by the boxes it is linked to, and moves the sheet whole. |
+
+How a graph is drawn is graphlet's to set, for every graph any mod draws with it: `/plugin configure graphlet@claude-code-ripple`.
+
+| Setting | What it picks |
+| :- | :- |
+| **Scrolling** | How a graph wider than the pane scrolls. `pinned`, as above, slides the long layers and keeps the ones that fit in view. `sheet` lays every layer on one sheet as wide as the longest, each box by the boxes it is linked to, and moves the sheet whole. |
+| **Long labels** | What becomes of a name too long for one line of its box. `wrap` breaks it onto more lines. `clip` keeps it to one, cut in the middle. |
+| **Links** | How the links between two layers share the rows there. `separate` gives links that would run into each other rows of their own, so each can be followed. `merged` runs them along one row, which is shorter; selecting a file shows which links are its own. |
 
 The desktop app, the VS Code extension, and the mobile app draw the map as a still ring picture in place of the graph, with nothing to select: the button under it maps again.
 
@@ -182,11 +194,13 @@ Ripple has notes for TypeScript and JavaScript, Python, Rust, and Go: where depe
 ## Developing
 
 ```
-claude --plugin-dir ./ripple                # load the mod from disk; it reloads on save
+claude --plugin-dir ./ripple --plugin-dir ../claude-code-graphlet/graphlet    # load both mods from disk
 claude plugin validate --strict ./ripple    # what the engine would refuse, before a session finds out
 claude plugin validate --strict .           # the marketplace manifest
 claude plugin test ./ripple                 # the tests, with no session and no model
 ```
+
+A session needs graphlet loaded beside Ripple, from a checkout of [its repository](https://github.com/nsodhi-cmu/claude-code-graphlet) or installed. The tests need neither: they stand in for it.
 
 Each time Claude Code loads the mod from this folder it writes its own API types into `ripple/.claude-plugin/types/`. `ripple/tsconfig.json` includes them, so an editor or `tsc -p ripple` checks the mod against the engine it runs on.
 
@@ -201,6 +215,7 @@ What Ripple does with that access:
 - **Watches permission checks.** To refuse what a mapper would have asked for, a hook sees every permission check of the session. It changes the answer only for a mapper's, and only from "ask" to "deny".
 - **Stores** the last map of each project in the mod's own store, under your Claude Code configuration directory.
 - **Submits a prompt** to your conversation only when you press `1`. The prompt is marked as Ripple's, not as your own words, and quotes what the mapper wrote as the mapper's.
+- **Hands the map to graphlet** to draw: the files' names, their marks, and the links between them. Graphlet is a mod too, with the same access; its [README](https://github.com/nsodhi-cmu/claude-code-graphlet#security) says what it does with it.
 
 It writes no file in your project, runs no program but git, and makes no network requests of its own.
 
@@ -209,8 +224,7 @@ It writes no file in your project, runs no program but git, and makes no network
 - A map is a reading of the code, not a proof. Uses through dynamic dispatch, reflection, or strings can be missed, most of all when the map is `via text search`.
 - A mapping is one agent run, which costs what any subagent costs. It runs only when you ask.
 - A map holds at most 60 symbols. Past that the mapper keeps the changed symbols, then what breaks, then what needs review, then the nearest dependents.
-- The graph draws the links between neighboring layers. Two files linked within a layer, or across more than one, are lit when either is selected, with no line drawn between them.
-- The links between two layers share one row, so where they overlap they read as one. Selecting a file lights its own.
+- Where the links between two layers are too tangled to be kept apart, some share a stretch of line. Selecting a file lights its own.
 - A name is drawn one cell a character, so a name written in characters two cells wide pushes its row out of line.
 - Ripple needs git and at least one commit, and maps one repository at a time.
 
