@@ -1,6 +1,6 @@
 import { describe, expect, test } from 'claude-code/testing'
 
-import { beyondRow, clipMiddle, clipStart, cutRow, markOf, reveal, rowText } from '../hooks/draw'
+import { beyondRow, clipStart, cutRow, markOf, reveal, rowText } from '../hooks/draw'
 import type { Span } from '../hooks/draw'
 
 describe('a window brought to what it must show', () => {
@@ -92,11 +92,6 @@ describe('cutting text to fit', () => {
       { text: '…', paint: 'dim' },
     ])
     expect(rowText(cutRow(row, 8))).toBe('● rende…')
-  })
-
-  test('a name is cut from its middle, so that how it starts and how it ends both stay', () => {
-    expect(clipMiddle('subscription-manager.test.ts', 16)).toBe('subscrip…test.ts')
-    expect(clipMiddle('cart.ts', 16)).toBe('cart.ts')
   })
 
   test('a path is cut from its start, so that the file\'s own name stays', () => {

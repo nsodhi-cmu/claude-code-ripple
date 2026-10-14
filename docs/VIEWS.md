@@ -1,26 +1,26 @@
 # The Views
 
-The pane draws the map two ways in a terminal, as a graph and as a tree, and as a ring picture everywhere else. Both terminal views draw it [by file](MAP.md#by-file), with the symbols of the selected file listed under them.
+The pane draws the map two ways in a terminal, as a graph and as a tree, and as a ring picture everywhere else. Both terminal views draw it [by file](MAP.md#by-file), with the symbols of the selected file listed under them. The graph is drawn by [graphlet](https://github.com/nsodhi-cmu/claude-code-graphlet), a mod for drawing graphs that Ripple depends on; the tree and the list are Ripple's own.
 
 | File | What it is |
 | :- | :- |
 | `ripple/hooks/files.ts` | The map by file. |
-| `ripple/hooks/graph.ts` | The graph view. |
+| `ripple/hooks/graph.ts` | The map as a graph, for graphlet to draw. |
 | `ripple/hooks/tree.ts` | The tree view. |
 | `ripple/hooks/list.ts` | The list of the selected file's symbols. |
-| `ripple/hooks/draw.ts` | What all three draw with. |
+| `ripple/hooks/draw.ts` | What the tree and the list draw with. |
 | `ripple/hooks/view.ts` | Which view, which symbol is selected, and how the pane's rows are shared out. |
 | `ripple/hooks/rings.ts` | The rings. |
 
 ## Drawings
 
-A view returns a `Drawing`: rows of painted text, and hits. A hit is a rectangle of cells and what a click inside it does: selects a symbol, or scrolls the map. A paint names what a run of text is (`changed`, `breaks`, `review`, `accent`, `dim`, or `plain`), and the pane gives each one a color from the person's theme. What changed and is itself at risk keeps the changed mark and takes the risk's paint.
+The tree and the list each return a `Drawing`: rows of painted text, and hits. A hit is a rectangle of cells and what a click inside it does: selects a symbol, or scrolls the map. A paint names what a run of text is (`changed`, `breaks`, `review`, `accent`, `dim`, or `plain`), and the pane gives each one a color from the person's theme. What changed and is itself at risk keeps the changed mark and takes the risk's paint.
 
 A drawing is plain data, and nothing that makes one touches the engine. That is what lets the tests compare a whole picture with the one expected.
 
 ## Windows
 
-A map can be larger than the room the pane has for it, so each view is drawn through a window. A `View` is these functions.
+A map can be larger than the room the pane has for it, so it is drawn through a window. The tree is a `View`, which is these functions; graphlet answers the same four of the graph.
 
 | Function | What it answers |
 | :- | :- |
@@ -33,24 +33,32 @@ These hold of both views.
 
 - **The layout does not depend on the selection.** Where a file is drawn depends on the map and the room alone. Selecting a file marks it and, where it was out of view, moves the window.
 - **The window moves no farther than it must.** `show` is built on `reveal`. A window that already shows the selected file whole stays where it is, even with the file at its edge. One that does not moves just far enough to show the file and a little past it: in the graph the links above and below the box and the start of the boxes beside it, in the tree the next row.
-- **What is out of view is counted.** A view that does not fit ends in a row that counts the files not wholly in view past each edge of the window, the sides' counts at the sides and the counts above and below between them. A click on a count scrolls that way: most of a room along the graph, a layer down it, and a window's worth of the tree.
+- **What is out of view is counted.** A view that does not fit ends in a row that counts the files not wholly in view past each edge of the window, the sides' counts at the sides and the counts above and below between them. A click on a count scrolls that way: most of a room of the graph, and a window's worth of the tree.
 
 The window stands where the person scrolled it until another file is selected, and then goes back to following the selection.
 
 ## The Graph
 
-`layersOf` sorts the files into layers by rank: the farthest files that use the change first, the changed files in the middle, the files they use last. Each layer is ordered by where its files' links sit in the layer nearer the change, so that links cross less, and files that tie keep the order the map names them in.
+`graphOf` in `ripple/hooks/graph.ts` turns the map by file into a graph as graphlet takes one.
 
-A box is a border, a label, and a border. The label is the file's mark and name, and a count of its symbols when it holds more than one. A name too long for a box is cut in its middle, which keeps how it starts and its extension. Between two layers are a row the links run along, where they meet in box-drawing junctions, and a row of arrowheads. A link runs straight down where the box above reaches over the one below.
+| Of a node | What Ripple gives it |
+| :- | :- |
+| `id` | The file's path. |
+| `label` | The file's name. |
+| `mark` | The file's mark: `◆`, `●`, `▲`, `○`, or `→`. |
+| `tone` | The paint of that mark, as graphlet names tones: `note` for what changed, `bad` for what breaks, `warn` for what needs review, `dim` for what the change uses. |
+| `badge` | How many of the map's symbols the file holds, when more than one. |
+| `layer` | The file's rank: the files that use the change counted upward from it, and the files it uses downward. |
 
-The `scroll` option picks how the layers are laid out across.
+A link runs from a file to a file it uses. So the farthest files that use the change are the top layer, the changed files are in the middle, and the files they use are at the bottom, and a link that runs back up the map, as where two files use each other, is one graphlet draws dashed.
 
-- **`pinned`.** A layer that fits the room is seated in it: the layer of the change centered, and every other layer against the one it was ordered by where that one fits too, each box as near as it can be to the middle of the boxes it is linked to; beside a longer layer it is centered. A layer longer than the room runs on from the left edge. Every layer slides under the window by the same amount, each no farther than its own end, so a layer that fits never moves and the links are drawn to wherever the boxes then stand.
-- **`sheet`.** Every layer is seated across the longest one's width, each box by the boxes it is linked to, and the window moves over all of them alike.
+Everything about the picture is graphlet's: how the layers are ordered and laid out, how a long name is wrapped, how links are routed, how a graph larger than its room scrolls, and the settings for each. Its [docs](https://github.com/nsodhi-cmu/claude-code-graphlet/tree/main/docs) describe them.
 
-The window moves by cells both ways. A box the window's edge cuts ends there in an ellipsis, and a link to a box out of view runs off the edge. The wheel scrolls along the map or down it, whichever way has more rooms' worth out of view.
+The pane's `ui.render` hook asks graphlet how many rows the graph needs, shares the pane's rows out, tells graphlet what the pane holds and which file is selected, and places the drawing that `next(e)` hands it. Ripple keeps the selection, since it is a symbol and not a file, and graphlet says what the person did:
 
-The selected box has a double frame. The links that touch it, and the boxes of every file linked to it, are painted `accent`: that is the only sign of a link between two files of one layer, or of layers that are not neighbors, since links are drawn between neighboring layers only.
+- A hook on `graphlet.select` hears a click on a box, or an arrow key over the graph, and selects that file.
+- A hook on `graphlet.key` hears every other key pressed over the graph, and does what the pane's own key does.
+- `h` `j` `k` `l` ask `$.graphlet.step` where the move lands, and a turn of the wheel over the graph is passed to `$.graphlet.scroll`.
 
 A room narrower than `GRAPH_COLUMNS` or shorter than `GRAPH_ROWS` has no graph: `modeIn` answers the tree for it.
 
@@ -72,12 +80,12 @@ The selection is a symbol's id, and the selected file is the one that holds it. 
 
 `selectedOf` answers the symbol the view names while the map still holds it; otherwise a reader starts on the first symbol that breaks, then the first that needs review, then the first changed one.
 
-| Key | In the graph | In the tree |
+| Key | In the graph, as graphlet answers | In the tree |
 | :- | :- | :- |
 | `h`, left | The file to the left in the layer. | The file this row hangs under. |
 | `l`, right | The file to the right in the layer. | The first file that hangs under this row. |
-| `k`, up | The layer above: the nearest file in the window that uses this one, else the nearest. | The row above. |
-| `j`, down | The layer below: the nearest file in the window that this one uses, else the nearest. | The row below. |
+| `k`, up | A file above that is linked to this one, the nearest; with none, the nearest file of the layer above. | The row above. |
+| `j`, down | A file below that is linked to this one, the nearest; with none, the nearest file of the layer below. | The row below. |
 | `u`, `d` | The symbol above and below in the list. | The same. |
 | `n` | The next flagged symbol, and after the last the first again. | The same. |
 
@@ -93,13 +101,13 @@ The `ui.render` hook in `ripple/hooks/register.tsx` draws the pane. In a termina
 
 A pane says everything around the map where that still leaves the map the rows it needs to be drawn whole, or `ROOMY_MAP_ROWS` of them. Otherwise it keeps only the header, the notice, the map, a shorter list, one row for the reason, and the keys, so a taller pane never shows less of the map than a shorter one.
 
-The map and the list are each drawn by a surface module, `ripple/hooks/pane.tsx`, because only a surface module is handed pointer events and the arrow keys. It paints the drawing it is given and posts what the person did: the hit a click landed on, and each key pressed while it holds the keyboard. The hooks module keeps the view in the session state `ripple.view`: the mode, the selected symbol, and where the person scrolled the map and the list to, which is null while they follow the selection. It decides what a click or a key does. In the list, the up and down arrows go through the symbols.
+The tree and the list are each drawn by a surface module, `ripple/hooks/pane.tsx`, because only a surface module is handed pointer events and the arrow keys; the graph is drawn by graphlet's. Ripple's paints the drawing it is given and posts what the person did: the hit a click landed on, and each key pressed while it holds the keyboard. The hooks module keeps the view in the session state `ripple.view`: the mode, the selected symbol, and where the person scrolled the tree and the list to, which is null while they follow the selection. Where the graph's window stands is graphlet's to keep. The hooks module decides what a click or a key does. In the list, the up and down arrows go through the symbols.
 
-The wheel reaches the hooks module as `ui.scroll`, with the row of the pane it was over. A turn over the map scrolls the map, and one over the list or below it scrolls the list. When the pane is too short for all it draws, the turn is left to the engine, which scrolls the pane.
+The wheel reaches the hooks module as `ui.scroll`, with the row of the pane it was over. A turn over the map scrolls the map, the graph through graphlet, and one over the list or below it scrolls the list. When the pane is too short for all it draws, the turn is left to the engine, which scrolls the pane.
 
 The keys are Buttons the hooks module draws under the list, which work whenever the pane has the keyboard; the arrow keys reach the map or the list only after a click on it. A press is answered by a `ui.press` hook and not by the Button's own closure, which the engine runs beneath the mod's hooks: a mapper started from there would not be the mod's to guard. The pane asks for the keyboard when the person opens it, and not when a map arrives.
 
-The `view` option in the plugin's manifest picks the view a map opens in, and the `t` key switches for the rest of the session. The `scroll` option picks how the graph scrolls.
+The `view` option in the plugin's manifest picks the view a map opens in, and the `t` key switches for the rest of the session. The two views are drawn by different mods, so the switch takes the keyboard from the drawing that had it, and the pane asks for it back.
 
 ## The Rings
 

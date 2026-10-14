@@ -1,6 +1,6 @@
 {
   "name": "ripple",
-  "version": "0.2.0",
+  "version": "0.3.0",
   "description": "See what your changes reach: a map of everything that depends on your diff, drawn inside Claude Code",
   "author": {
     "name": "Neal",
@@ -17,6 +17,9 @@
     "code-review"
   ],
   "types": "./types/index.d.ts",
+  "dependencies": [
+    "graphlet"
+  ],
   "userConfig": {
     "view": {
       "type": "string",
@@ -27,16 +30,6 @@
         "tree"
       ],
       "default": "graph"
-    },
-    "scroll": {
-      "type": "string",
-      "title": "Graph scrolling",
-      "description": "How a graph wider than the pane scrolls: pinned slides the long rows and keeps the ones that fit in view; sheet lays every row on one wide sheet and moves it whole.",
-      "options": [
-        "pinned",
-        "sheet"
-      ],
-      "default": "pinned"
     }
   }
 }

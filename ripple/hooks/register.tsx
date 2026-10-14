@@ -15,8 +15,10 @@ import {
 } from './changes'
 import type { Base, Changes } from './changes'
 import { COLORS, LEGEND, clipStart, markOf } from './draw'
-import type { Paint, Pan, Room } from './draw'
-import { fileOf, filesOf } from './files'
+import type { Move, Paint, Pan, Room } from './draw'
+import { fileOf, filesOf, symbolIn } from './files'
+import type { FileMap } from './files'
+import { graphOf } from './graph'
 import { drawList, listSays, scrollList, showInList, stepInList } from './list'
 import {
   REPORT_DESCRIPTION,
@@ -39,8 +41,9 @@ import {
   reportReply,
   taskPrompt,
 } from './mapper'
-import { LIST_MOVES, MOVES, factsOf, modeIn, nextFlagged, planOf, selectedOf, viewsOf } from './view'
 import { ringSvg } from './rings'
+import { treeView } from './tree'
+import { LIST_MOVES, MOVES, factsOf, modeIn, nextFlagged, planOf, selectedOf } from './view'
 
 const PANE = 'ripple'
 /** A room tall enough to draw any map whole, which is how the rows a map needs are counted. */
@@ -74,14 +77,13 @@ const view = atom({ plugin: 'ripple', key: 'view' } as const, { mode: null, sele
 
 /** The view the map opens in until the person switches: the plugin's `view` option. */
 let firstMode: RippleMode = 'graph'
-/** The views of the map, the graph scrolling as the plugin's `scroll` option says. */
-let views = viewsOf('pinned')
 /**
  * What the pane last drew, which a key or a turn of the wheel goes on from:
  * the view it drew the map in (the tree, wherever the graph had no room), the
- * room it gave the map and where the map's window stood, the rows it gave the
- * list and the symbol the list started from, and the row of the pane's body
- * the list begins on.
+ * room it gave the map and where the tree's window stood, the rows it gave
+ * the list and the symbol the list started from, and the row of the pane's
+ * body the list begins on. Where the graph's window stands is graphlet's to
+ * keep.
  */
 let shown: { mode: RippleMode; room: Room; pan: Pan; listRows: number; top: number; listAt: number } = {
   mode: 'graph',
@@ -310,15 +312,17 @@ const isPan = (value: unknown): value is Pan =>
   Number.isFinite((value as Pan).x) &&
   Number.isFinite((value as Pan).y)
 
-/** Scrolls the map's window from where the person left it, or where it was last drawn: by cells, or by turns of the wheel. */
+/**
+ * Scrolls the map by cells, or by turns of the wheel: the graph through
+ * graphlet, and the tree's window from where the person left it, or where it
+ * was last drawn.
+ */
 const scrollMap = async ($: EngineInterface, by: Pan | number): Promise<void> => {
   const held = await read($, map)
   if (held === null) return
+  if (shown.mode === 'graph') return $.graphlet.scroll({ pane: PANE, by })
   const files = filesOf(held)
-  await update($, view, seen => ({
-    ...seen,
-    pan: views[shown.mode].scroll(files, shown.room, seen.pan ?? shown.pan, by),
-  }))
+  await update($, view, seen => ({ ...seen, pan: treeView.scroll(files, shown.room, seen.pan ?? shown.pan, by) }))
 }
 
 /** Scrolls the list under the map from where the person left it, or where it was last drawn, by rows. */
@@ -344,8 +348,22 @@ const select = async ($: EngineInterface, held: RippleMap, to: string | null): P
 }
 
 /**
+ * The symbol a move from the selected file lands on, in the view the pane
+ * last drew: the one selected while the move stays in its file, else the
+ * first of the file it reaches.
+ */
+const stepped = async ($: EngineInterface, files: FileMap, at: string | null, move: Move): Promise<string | null> => {
+  if (shown.mode === 'tree') return treeView.step(files, at, move, shown.room, shown.pan)
+  const path = await $.graphlet.step({ pane: PANE, move })
+  const file = files.files.find(one => one.path === path)
+  return (file === undefined ? undefined : symbolIn(file, at)?.id) ?? at
+}
+
+/**
  * Does what one key of the pane does: a Button's, or a key the map or the
  * list was handed. In the list, up and down go through the file's symbols.
+ * The two views are drawn by different mods, so switching between them takes
+ * the keyboard from the one that had it, and the pane asks for it back.
  */
 const press = async ($: EngineInterface, key: string, isInList = false): Promise<void> => {
   try {
@@ -359,12 +377,13 @@ const press = async ($: EngineInterface, key: string, isInList = false): Promise
     if (listMove !== undefined) {
       if (file !== undefined) await select($, held, stepInList(file, at, listMove))
     } else if (move !== undefined) {
-      await select($, held, views[shown.mode].step(files, at, move, shown.room, shown.pan))
+      await select($, held, await stepped($, files, at, move))
     } else if (key === 'n') {
       await select($, held, nextFlagged(held, at))
     } else if (key === 't') {
       const other: RippleMode = shown.mode === 'tree' ? 'graph' : 'tree'
       await update($, view, seen => ({ ...seen, mode: other, pan: null }))
+      await openPane($, true)
     } else if (key === ASK) {
       await ask($)
     } else if (key === REMAP) {
@@ -378,7 +397,6 @@ const press = async ($: EngineInterface, key: string, isInList = false): Promise
 
 export const register: Register = (on, options) => {
   firstMode = options.view === 'tree' ? 'tree' : 'graph'
-  views = viewsOf(options.scroll === 'sheet' ? 'sheet' : 'pinned')
 
   on('session.start', async ($, e, next) => {
     try {
@@ -503,6 +521,23 @@ export const register: Register = (on, options) => {
     return {}
   })
 
+  /** Graphlet says which file the person picked on the graph: its box clicked, or an arrow key over it. */
+  on('graphlet.select', async ($, e, next) => {
+    const held = e.pane === PANE ? await read($, map) : null
+    const file = held === null ? undefined : filesOf(held).files.find(one => one.path === e.node)
+    if (held !== null && file !== undefined) {
+      const at = selectedOf(held, (await read($, view)).selected)?.id ?? null
+      await select($, held, symbolIn(file, at)?.id ?? null)
+    }
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
+  /** Graphlet hands on the keys pressed over the graph that are the pane's, not its own. */
+  on('graphlet.key', async ($, e, next) => {
+    if (e.pane === PANE) await press($, e.key)
+    return next(e)
+  }).catch(($, e, next) => next(e))
+
   on('ui.scroll', { component: 'Pane', requestId: 'ripple' }, async ($, e, next) => {
     if (e.origin.kind !== 'person' || e.pointer === undefined || e.contentRows > e.bodyRows) return next(e)
     if (e.pointer.row < shown.listAt) await scrollMap($, e.by)
@@ -510,7 +545,7 @@ export const register: Register = (on, options) => {
     return {}
   }).catch(($, e, next) => next(e))
 
-  on('ui.render', { component: 'Pane', requestId: 'ripple' }, async ($, e) => {
+  on('ui.render', { component: 'Pane', requestId: 'ripple' }, async ($, e, next) => {
     const held = await read($, map)
     const at = await read($, mapping)
     const seen = await read($, view)
@@ -569,7 +604,14 @@ export const register: Register = (on, options) => {
     const files = hasNodes ? filesOf(held) : undefined
     const node = hasNodes ? selectedOf(held, seen.selected) : undefined
     const file = files === undefined ? undefined : fileOf(files, node?.id ?? null)
+    const graph = files === undefined ? undefined : graphOf(files)
     const asked = modeIn(seen.mode ?? firstMode, { columns, rows: WHOLE_ROWS })
+    const mapNeeds =
+      files === undefined || graph === undefined
+        ? 0
+        : asked === 'graph'
+          ? (await $.graphlet.measure({ graph, columns })).rows
+          : treeView.draw(files, null, { columns, rows: WHOLE_ROWS }, ORIGIN).rows.length
     const plan = planOf(
       { columns, rows: e.props.scroll.bodyRows },
       {
@@ -578,8 +620,7 @@ export const register: Register = (on, options) => {
         legend: LEGEND_LABELS,
         keys: keysOf(asked).map(one => one.label),
         symbols: Math.max(1, ...(files?.files ?? []).map(one => one.symbols.length)),
-        mapNeeds:
-          files === undefined ? 0 : views[asked].draw(files, null, { columns, rows: WHOLE_ROWS }, ORIGIN).rows.length,
+        mapNeeds,
       },
     )
     const room = { columns, rows: plan.mapRows }
@@ -589,15 +630,25 @@ export const register: Register = (on, options) => {
     const root = await rootOf($)
 
     let drawn: RenderElement | false = false
-    if (files !== undefined && file !== undefined && node !== undefined && hasNodes) {
-      const pan = seen.pan ?? views[mode].show(files, node.id, room, shown.pan)
+    if (files !== undefined && graph !== undefined && file !== undefined && node !== undefined && hasNodes) {
       const top = seen.top ?? showInList(file, node.id, plan.listRows, shown.top)
-      const picture = views[mode].draw(files, node.id, room, pan)
       const says = listSays(file, plan.listRows, top)
-      shown = { mode, room, pan, listRows: plan.listRows, top, listAt: plan.mapTop + picture.rows.length + gap }
+      let picture: RenderElement
+      let pictureRows: number
+      let pan = shown.pan
+      if (mode === 'graph') {
+        pictureRows = (await $.graphlet.show({ pane: PANE, graph, ...room, selected: file.path })).rows
+        picture = await next(e)
+      } else {
+        pan = seen.pan ?? treeView.show(files, node.id, room, shown.pan)
+        const tree = treeView.draw(files, node.id, room, pan)
+        pictureRows = tree.rows.length
+        picture = <Client key="map" module="./pane.tsx" props={tree} />
+      }
+      shown = { mode, room, pan, listRows: plan.listRows, top, listAt: plan.mapTop + pictureRows + gap }
       drawn = (
         <Box flexDirection="column" marginTop={gap}>
-          <Client key="map" module="./pane.tsx" props={picture} />
+          {picture}
           <Box flexDirection="column" marginTop={gap}>
             <Text wrap="truncate-end">
               <Text bold>{`▸ ${clipStart(file.path, Math.max(1, columns - says.length - OVER_LIST_CHARS))}`}</Text>

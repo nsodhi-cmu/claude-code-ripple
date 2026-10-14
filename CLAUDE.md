@@ -2,7 +2,7 @@
 
 # Ripple
 
-Ripple is a Claude Code mod: a plugin whose hooks are TypeScript that Claude Code loads and runs itself. `/ripple` reads the changes from git, starts a background agent that traces what depends on them and edits nothing, and draws that agent's report in a pane, by file, as a graph the person can move through.
+Ripple is a Claude Code mod: a plugin whose hooks are TypeScript that Claude Code loads and runs itself. `/ripple` reads the changes from git, starts a background agent that traces what depends on them and edits nothing, and draws that agent's report in a pane, by file, as a graph the person can move through. The graph is drawn by graphlet, a mod Ripple depends on, whose repository is `../claude-code-graphlet` beside this one.
 
 ## Commands
 
@@ -10,10 +10,10 @@ Ripple is a Claude Code mod: a plugin whose hooks are TypeScript that Claude Cod
 claude plugin validate --strict ./ripple    # what the engine would refuse to load
 claude plugin validate --strict .           # the marketplace manifest
 claude plugin test ./ripple                 # every test, with no session and no model
-claude --plugin-dir ./ripple                # a session with the mod loaded from disk
+claude --plugin-dir ./ripple --plugin-dir ../claude-code-graphlet/graphlet    # a session with both mods loaded from disk
 ```
 
-There is no build and nothing to install. To type-check, load the mod once so that Claude Code writes its API types into `ripple/.claude-plugin/types/`, then point TypeScript at `ripple/tsconfig.json`.
+There is no build and nothing to install. To type-check, load the mod once beside graphlet so that Claude Code writes its API types, and graphlet's, into `ripple/.claude-plugin/types/`, then point TypeScript at `ripple/tsconfig.json`.
 
 ## Where Things Are
 
@@ -26,14 +26,14 @@ ripple/hooks/
   mapper.ts       the mapper's prompts, and what asking Claude about a symbol submits
   map.ts          reading a report into a map, and describing it
   files.ts        the map by file
-  graph.ts        the graph view
+  graph.ts        the map as a graph, for graphlet to draw
   tree.ts         the tree view
   list.ts         the list of the selected file's symbols
   view.ts         the selection, the keys, and how the pane's rows are shared out
-  draw.ts         what the views draw with, and how a window follows a selection
+  draw.ts         what the tree and the list draw with, and how a window follows a selection
   pane.tsx        the surface module that paints a drawing and posts clicks and keys
   rings.ts        the ring picture the other surfaces draw
-ripple/tests/     the tests, one file for each of those it tests
+ripple/tests/     the tests, one file for each of those it tests, and a stand-in for graphlet
 ripple/types/     the map's types and the session state
 docs/             one file for each part: the command, the mapper, the map, the views
 ```
@@ -48,10 +48,12 @@ The engine reads a hooks module's source before it loads it, and refuses what it
 - A Button's `onPress` closure runs beneath the mod's own hooks. An agent started from one is out of their reach: its commands raise permission prompts, and its report is never taken. The pane's keys are answered in a `ui.press` hook, where what they start stays under the hooks.
 - The wheel is not a pointer event: it raises `ui.scroll` on the pane, with the row it was over, and a hook that does not call `next` keeps the engine from scrolling. The test kit raises no wheel, so what a turn does is tested where it is worked out, in the views.
 - In the test kit, a plugin's `$.agent.spawn` reaches the test's `agent.spawn` hook as the Agent tool's call, and the kit reads the started agent's id off `result.agentId`.
+- Ripple hooks `graphlet.select`, so the engine does not load it where no plugin provides `$.graphlet`. Every test of the engine's side loads `ripple/tests/graphlet.tsx` beside it: an inline plugin, which closes over nothing of the test file, so what it was handed is read off what it draws. A test cannot call `$.graphlet` itself; a press on one of the stand-in's Buttons has the stand-in call it.
+- The graph and the tree are drawn by different mods' surface modules. Switching views unmounts the one that held the keyboard, which then falls to the prompt, so the pane asks for it again.
 - The engine decides which shell commands run without a permission prompt by how they are spelled: `git diff --relative HEAD` does, and `git diff HEAD --relative` does not. A mapper is refused what would prompt, so a command its prompt names has to be one the engine lets through: `git show <ref>:./<path>` is another that is. `$.tool.check({ tool: 'Bash', input: { command } })` answers for any spelling, with nothing run.
 
 The API's types are the reference for everything else: `ripple/.claude-plugin/types/claude-code/index.d.ts`, once the mod has been loaded.
 
 ## Trying A Change
 
-The tests cover what the mod does with a report, not what a mapper makes of real code. To see that, make a change in some other git repository, run `claude --plugin-dir <path to this repository>/ripple` there, and run `/ripple`.
+The tests cover what the mod does with a report, not what a mapper makes of real code, and not what graphlet draws. To see those, make a change in some other git repository, run `claude --plugin-dir <path to this repository>/ripple --plugin-dir <path to graphlet's repository>/graphlet` there, and run `/ripple`.

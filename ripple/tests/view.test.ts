@@ -4,7 +4,7 @@ import type { RippleMap } from '../types'
 import { SHOP_MAP } from './fixture'
 import { filesOf } from '../hooks/files'
 import { GRAPH_COLUMNS, GRAPH_ROWS } from '../hooks/graph'
-import { factsOf, flowRows, modeIn, nextFlagged, planOf, selectedOf, viewsOf, wrappedRows } from '../hooks/view'
+import { factsOf, flowRows, modeIn, nextFlagged, planOf, selectedOf, wrappedRows } from '../hooks/view'
 
 const id = (name: string): string => node(name).id
 
@@ -50,22 +50,6 @@ describe('the selected symbol', () => {
 })
 
 describe('the views', () => {
-  const shop = filesOf(SHOP_MAP)
-  const room = { columns: 90, rows: 40 }
-  const origin = { x: 0, y: 0 }
-
-  test('the same key means each view\'s own direction: down a layer in the graph, down a row in the tree', () => {
-    const views = viewsOf('pinned')
-    expect(views.graph.step(shop, id('formatPrice'), 'down', room, origin)).toBe(id('currencySymbol'))
-    expect(views.tree.step(shop, id('formatPrice'), 'down', room, origin)).toBe(id('renderCart'))
-  })
-
-  test('the graph scrolls as it is told to: pinned, a layer that fits never leaves the window; on a sheet it does', () => {
-    const narrow = { columns: 44, rows: 40 }
-    expect(viewsOf('pinned').graph.show(shop, id('CheckoutPage'), narrow, { x: 20, y: 0 })).toEqual({ x: 20, y: 0 })
-    expect(viewsOf('sheet').graph.show(shop, id('CheckoutPage'), narrow, { x: 20, y: 0 })).toEqual({ x: 0, y: 0 })
-  })
-
   test('a room too narrow or too short for the graph gets the tree instead', () => {
     expect(modeIn('graph', { columns: GRAPH_COLUMNS, rows: GRAPH_ROWS })).toBe('graph')
     expect(modeIn('graph', { columns: GRAPH_COLUMNS - 1, rows: 40 })).toBe('tree')

@@ -148,15 +148,6 @@ export function rowText(row: Span[]): string {
   return row.map(span => span.text).join('')
 }
 
-/** A name cut to `max` characters from its middle, so that it keeps how it starts and how it ends. */
-export function clipMiddle(name: string, max: number): string {
-  const characters = [...name]
-  if (characters.length <= max) return name
-  const kept = Math.max(0, max - 1)
-  const head = characters.slice(0, Math.ceil(kept / 2)).join('')
-  return `${head}…${characters.slice(characters.length - Math.floor(kept / 2)).join('')}`
-}
-
 /** A path cut to `max` characters from its start, where it says least of the file. */
 export function clipStart(path: string, max: number): string {
   const characters = [...path]
