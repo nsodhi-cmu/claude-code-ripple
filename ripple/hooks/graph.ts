@@ -30,7 +30,7 @@ const TONES = {
  * The map's files as a graph: each a node under its path, saying its mark,
  * its name, and how many of the map's symbols it holds when more than one.
  * A file's layer is how far it stands from the change, the files that use the
- * change counted upward.
+ * change counted upward, and a changed file is put foremost.
  */
 export function graphOf(map: FileMap): Graph {
   return {
@@ -43,6 +43,7 @@ export function graphOf(map: FileMap): Graph {
         tone: TONES[mark.paint],
         ...(file.symbols.length > 1 ? { badge: String(file.symbols.length) } : {}),
         layer: rankOf(file),
+        ...(file.role === 'changed' ? { priority: 1 } : {}),
       }
     }),
     links: map.links,

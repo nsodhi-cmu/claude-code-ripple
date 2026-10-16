@@ -10,22 +10,22 @@ Two callers of formatPrice no longer compile, and receipts may show the wrong cu
 
      ┌───────────────┐  ┌────────────────────┐
      │ ○ checkout.ts │  │ ○ pages/invoice.ts │
-     └───────┬───────┘  └───────┬────────────┘
-             │                  │
-             ▼                  ▼
-       ╔═══════════╗  ┌──────────────────┐  ┌─────────┐  ┌────────────┐
-       ║ ● cart.ts ║  │ ● src/invoice.ts │  │ ○ ui.ts │  │ ▲ email.ts │
-       ╚═════╤═════╝  └─────────┬────────┘  └────┬────┘  └──────┬─────┘
-             └──────────────────┴───────┬────────┴──────────────┘
-                                        ▼
-                                 ┌────────────┐
-                                 │ ◆ price.ts │
-                                 └──────┬─────┘
-                                        │
-                                        ▼
-                                ┌───────────────┐
-                                │ → money.ts  2 │
-                                └───────────────┘
+     └─────────┬─────┘  └─────────┬──────────┘
+               │                  │
+               ▼                  ▼
+         ╔═══════════╗  ┌──────────────────┐  ┌─────────┐  ┌────────────┐
+         ║ ● cart.ts ║  │ ● src/invoice.ts │  │ ○ ui.ts │  │ ▲ email.ts │
+         ╚═════╤═════╝  └────────────────┬─┘  └────┬────┘  └──────┬─────┘
+               └─────────────────────────┼─────────┴──────────────┘
+                                         ▼
+                                  ┏━━━━━━━━━━━━┓
+                                  ┃ ◆ price.ts ┃
+                                  ┗━━━━━━┯━━━━━┛
+                                         │
+                                         ▼
+                                 ┌───────────────┐
+                                 │ → money.ts  2 │
+                                 └───────────────┘
                                                                         html ↗
 
 ▸ src/cart.ts · 1 symbol · open
@@ -87,7 +87,7 @@ Mapping runs in the background, so you can keep working while it does. Run `/rip
 
 The pane opens beside the transcript where the terminal is wide enough for Claude Code to dock it, and above the prompt otherwise.
 
-Each box is a file, marked as the worst of its symbols is, with a count when it holds more than one. The files that use the change sit above it, and the files it uses below. A link runs from a file to a file it uses; one that runs back up the map, as where two files use each other, is dashed. One file is selected: its box is double-framed, and its links and the files they reach are lit. Under the map is the list of that file's symbols, in the order they stand in the file, each with its line. One of them is selected too, and the lines under the list say what it is, what it is linked to, and the mapper's reason for flagging it.
+Each box is a file, marked as the worst of its symbols is, with a count when it holds more than one, and a file the change is in has a heavy frame. The files that use the change sit above it, and the files it uses below. A link runs from a file to a file it uses; one that runs back up the map, as where two files use each other, is dashed. One file is selected: its box is double-framed, and its links and the files they reach are lit. Under the map is the list of that file's symbols, in the order they stand in the file, each with its line. One of them is selected too, and the lines under the list say what it is, what it is linked to, and the mapper's reason for flagging it.
 
 | Key | What it does |
 | :- | :- |
@@ -110,17 +110,18 @@ The files of a layer keep one order, whatever is selected. A layer longer than t
  ┌───────────────┐  ┌────────────────────┐
  │ ○ checkout.ts │  │ ○ pages/invoice.ts │
  └───────┬───────┘  └──────────┬─────────┘
-─────────┘                     │
-               ┌───────────────┘
+─────────┘     ┌───────────────┘
+               │
+               │
                ▼
 ──┐  ┌──────────────────┐  ╔═════════╗  ┌───
 … │  │ ● src/invoice.ts │  ║ ○ ui.ts ║  │ ▲…
 ──┘  └────────────────┬─┘  ╚════╤════╝  └───
 ──────────────────────┼─────────┴───────────
                       ▼
-               ┌────────────┐
-               │ ◆ price.ts │
-               └──────┬─────┘
+               ┏━━━━━━━━━━━━┓
+               ┃ ◆ price.ts ┃
+               ┗━━━━━━┯━━━━━┛
                       │
                       ▼
               ┌───────────────┐

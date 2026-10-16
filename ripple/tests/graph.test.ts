@@ -54,7 +54,7 @@ test('a link runs from the file that uses to the file that is used, once however
   expect(SHOP.links.filter(link => link.from === 'src/price.ts')).toEqual([{ from: 'src/price.ts', to: 'src/money.ts' }])
 })
 
-test('a changed file at risk keeps the mark of a change and takes the tone of its risk', () => {
+test('a changed file is put foremost, and one at risk keeps the mark of a change and takes the tone of its risk', () => {
   const graph = graphOf(
     filesOf({
       method: 'lsp',
@@ -66,9 +66,9 @@ test('a changed file at risk keeps the mark of a change and takes the tone of it
       edges: [{ from: 'c.ts:c', to: 'a.ts:a' }],
     }),
   )
-  expect(graph.nodes.map(one => [one.mark, one.tone])).toEqual([
-    ['◆', 'warn'],
-    ['◆', 'note'],
-    ['○', 'plain'],
+  expect(graph.nodes.map(one => [one.mark, one.tone, one.priority])).toEqual([
+    ['◆', 'warn', 1],
+    ['◆', 'note', 1],
+    ['○', 'plain', undefined],
   ])
 })

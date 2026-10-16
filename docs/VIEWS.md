@@ -49,6 +49,7 @@ The window stands where the person scrolled it until another file is selected, a
 | `tone` | The paint of that mark, as graphlet names tones: `note` for what changed, `bad` for what breaks, `warn` for what needs review, `dim` for what the change uses. |
 | `badge` | How many of the map's symbols the file holds, when more than one. |
 | `layer` | The file's rank: the files that use the change counted upward from it, and the files it uses downward. |
+| `priority` | 1 for a file the change is in, and none for the rest: graphlet draws a changed file with a heavy frame, and keeps its links straighter where it can. |
 
 A link runs from a file to a file it uses. So the farthest files that use the change are the top layer, the changed files are in the middle, and the files they use are at the bottom, and a link that runs back up the map, as where two files use each other, is one graphlet draws dashed.
 
