@@ -174,10 +174,11 @@ describe('ring svg', () => {
     expect(odd).not.toContain('<b>')
   })
 
-  test('a map at the node cap stays well under the limit', () => {
+  test('a map at the node cap is drawn whole, a tooltip for each symbol, within the limit', () => {
     const big = ringSvg(crowd(30, MAX_NODES - 31))
     expect(count(big, '<g class="n">')).toBe(MAX_NODES)
-    expect(big.length).toBeLessThan(SVG_LIMIT / 3)
+    expect(count(big, '<title>')).toBe(MAX_NODES + 1)
+    expect(big.length).toBeLessThan(SVG_LIMIT)
   })
 
   test('an empty map is still a picture', () => {

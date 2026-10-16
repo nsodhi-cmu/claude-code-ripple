@@ -232,7 +232,7 @@ It writes no file in your project, runs no program but git, and makes no network
 
 - A map is a reading of the code, not a proof. Uses through dynamic dispatch, reflection, or strings can be missed, most of all when the map is `via text search`.
 - A mapping is one agent run, which costs what any subagent costs. It runs only when you ask.
-- A map holds at most 60 symbols. Past that the mapper keeps the changed symbols, then what breaks, then what needs review, then the nearest dependents.
+- A map holds at most 150 symbols. Past that the mapper keeps the changed symbols, then what breaks, then what needs review, then the nearest dependents.
 - Where the links between two layers are too tangled to be kept apart, two of them may share a stretch of line. Selecting a file lights its own.
 - A name is drawn one cell a character, so a name written in characters two cells wide pushes its row out of line.
 - Ripple needs git and at least one commit, and maps one repository at a time.

@@ -3,7 +3,7 @@ import type { RippleEdge, RippleMap, RippleNode, RippleOrigin, RippleReport } fr
 // The map as data: reading what the mapper reports, and saying what it holds.
 
 /** The most nodes a map holds. */
-export const MAX_NODES = 60
+export const MAX_NODES = 150
 /** The most characters that are kept of each thing a mapper writes. */
 const NAME_CHARS = 80
 const FILE_CHARS = 300
