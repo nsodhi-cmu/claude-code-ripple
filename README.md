@@ -47,7 +47,7 @@ A diff shows what you changed and nothing of what it reaches. Rename a struct, a
 
 ## Installing
 
-Ripple is tested on Claude Code 2.1.299. Mods are new and their API still changes between releases, so an older Claude Code may not load it. At the prompt of a session:
+Ripple is tested on Claude Code 2.1.301. Mods are new and their API still changes between releases, so an older Claude Code may not load it. At the prompt of a session:
 
 ```
 /plugin install ripple --marketplace nsodhi-cmu/claude-code-ripple
@@ -100,11 +100,11 @@ Each box is a file, marked as the worst of its symbols is, with a count when it 
 
 The keys work while the pane has the keyboard, which it asks for when you open it. `ctrl+x tab` moves the keyboard between the pane and the prompt, and typing anything else goes back to the prompt. The keys that start something are digits, so the first letter of a prompt never sets one off.
 
-The mouse works without the keyboard. A click on a box selects its file, and a click on a row of the list selects that symbol. The wheel scrolls whichever of the two it is over. Once the map or the list has been clicked, the arrow keys move through it as the letters do. A click on `html ↗`, in the corner under the graph, opens the graph as a page in your browser.
+The mouse works without the keyboard. A click on a box selects its file, and a click on a row of the list selects that symbol. The wheel scrolls whichever of the two it is over, and a drag moves the map. Once the map or the list has been clicked, the arrow keys move through it as the letters do. Over a clicked map, `f` draws it in focus on the selected file and the files nearest it, and again draws it whole; `/` finds a file by its name as you type it, return goes to the next one found, and backspace with nothing typed stops. A click on `html ↗`, in the corner under the graph, opens the graph as a page in your browser.
 
 #### A Map Larger Than The Pane
 
-The files of a layer keep one order, whatever is selected. A layer longer than the pane runs off its edge, a box the edge cuts ends in an ellipsis, and a row under the map counts the files out of view on each side:
+The files of a layer keep one order, whatever is selected. A layer longer than the pane runs off its edge, a box the edge cuts ends in an ellipsis, and a row under the map counts the files out of view on each side. A file linked to the selected one that is out of view is named at the edge it lies past, `cart.ts ▸`, and a click on the name selects it:
 
 ```
  ┌───────────────┐  ┌────────────────────┐
@@ -164,6 +164,7 @@ How a graph is drawn is graphlet's to set, for every graph any mod draws with it
 | **Scrolling** | How a graph wider than the pane scrolls. `pinned`, as above, slides the long layers and keeps the ones that fit in view. `sheet` lays every layer on one sheet as wide as the longest, each box by the boxes it is linked to, and moves the sheet whole. |
 | **Long labels** | What becomes of a name too long for one line of its box. `wrap` breaks it onto more lines. `clip` keeps it to one, cut in the middle. |
 | **Links** | How the links between two layers share the rows there. `separate` gives each file's links a row of their own wherever they would run into another's, and each file an arrowhead for each set of files whose links reach it. `merged` runs them all along one row into one arrowhead a file, which is shorter; selecting a file shows which links are its own. |
+| **Motion** | Whether the selected file's links move. `still` lights them as lines. `flowing` runs beads along each, from the file that uses to the file it uses, and pulses the two links between files that use each other. |
 
 The desktop app, the VS Code extension, and the mobile app draw the map as a still ring picture in place of the graph, with nothing to select: the button under it maps again.
 
